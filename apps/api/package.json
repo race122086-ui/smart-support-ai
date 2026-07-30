@@ -1,0 +1,19 @@
+{
+  "name": "@smartsupport/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "build": "node --check src/app.js && node --check src/server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/swagger": "^9.5.1",
+    "@fastify/swagger-ui": "^6.1.1",
+    "@smartsupport/contracts": "0.1.0",
+    "fastify": "^5.6.0"
+  }
+}
