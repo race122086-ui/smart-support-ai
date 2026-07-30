@@ -1,35 +1,35 @@
 import './style.css'
-import { calculateStats, formatTicket } from './report-utils.js'
+import {
+  DEPARTMENTS,
+  PRIORITIES,
+  ROLES,
+  STATUSES,
+  UNASSIGNED_TECHNICIAN,
+} from './domain/constants.js'
+import { createBackup, normalizeBackup } from './domain/backups.js'
+import {
+  createNotification,
+  markAllNotificationsAsRead,
+} from './domain/notifications.js'
+import {
+  calculateStats,
+  createActivity,
+  createReport,
+  filterReports,
+  formatTicket,
+  getSlaDeadline,
+  isSlaOverdue,
+  sortReports,
+} from './domain/reports.js'
+import { getTechnicians as getDomainTechnicians } from './domain/settings.js'
+import { escapeHtml } from './domain/text.js'
+import { createLocalRepositories } from './persistence/local-storage.js'
 
-const STORAGE_KEY = 'smartsupport-reports'
-const SETTINGS_KEY = 'smartsupport-settings'
-const NOTIFICATIONS_KEY = 'smartsupport-notifications'
+const repositories = createLocalRepositories()
 
-const PRIORITIES = ['Baja', 'Media', 'Alta']
-const DEPARTMENTS = [
-  'Administración',
-  'Almacén',
-  'Comercial',
-  'Contabilidad',
-  'Finanzas',
-  'Infraestructura',
-  'Operaciones',
-  'Sistemas',
-]
-const STATUSES = {
-  PENDING: 'Pendiente',
-  IN_PROGRESS: 'En progreso',
-  RESOLVED: 'Resuelto',
-}
-const DEFAULT_SETTINGS = {
-  profile: { name: 'Administrador', role: 'Administrador' },
-  technicians: ['Ana Torres', 'Carlos Ruiz', 'Laura Méndez'],
-  sla: { Baja: 72, Media: 24, Alta: 8 },
-}
-
-let reports = loadReports()
-let settings = loadSettings()
-let notifications = loadNotifications()
+let reports = repositories.reports.list()
+let settings = repositories.settings.get()
+let notifications = repositories.notifications.list()
 let searchQuery = ''
 let statusFilter = 'Todos'
 let priorityFilter = 'Todas'
@@ -43,90 +43,20 @@ let isReportFormOpen = false
 let currentView = 'dashboard'
 let openActivityReportId = null
 
-function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY))
-    return {
-      ...DEFAULT_SETTINGS,
-      ...saved,
-      profile: { ...DEFAULT_SETTINGS.profile, ...saved?.profile },
-      sla: { ...DEFAULT_SETTINGS.sla, ...saved?.sla },
-      technicians: saved?.technicians || DEFAULT_SETTINGS.technicians,
-    }
-  } catch {
-    return structuredClone(DEFAULT_SETTINGS)
-  }
-}
-
 function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  settings = repositories.settings.update(settings)
 }
 
 function getTechnicians() {
-  return [...new Set(['Sin asignar', settings.profile.name, ...settings.technicians])]
-}
-
-function loadNotifications() {
-  try {
-    return JSON.parse(localStorage.getItem(NOTIFICATIONS_KEY)) || []
-  } catch {
-    return []
-  }
+  return getDomainTechnicians(settings)
 }
 
 function saveNotifications() {
-  localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications))
-}
-
-function loadReports() {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY)
-    const storedReports = data ? JSON.parse(data) : []
-
-    return storedReports.map((report, index) => ({
-      ...report,
-      ticketNumber: report.ticketNumber || index + 1,
-      contactEmail: report.contactEmail || createContactEmail(report.userName),
-      contactPhone: report.contactPhone || createContactPhone(report.ticketNumber || index + 1),
-      department: report.department || suggestDepartment(report.description),
-      technician: report.technician || 'Sin asignar',
-      activity: Array.isArray(report.activity) ? report.activity : [],
-    }))
-  } catch {
-    return []
-  }
-}
-
-function createContactEmail(userName) {
-  const localPart = userName
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '.')
-    .replace(/^\.+|\.+$/g, '')
-
-  return `${localPart || 'usuario'}@empresa.com`
-}
-
-function createContactPhone(ticketNumber) {
-  return `+52 55 0000 ${String(ticketNumber).padStart(4, '0')}`
-}
-
-function suggestDepartment(description = '') {
-  const text = description.toLowerCase()
-  if (text.includes('contabil')) return 'Contabilidad'
-  if (text.includes('factur')) return 'Finanzas'
-  if (text.includes('inventario')) return 'Almacén'
-  if (text.includes('internet') || text.includes('red') || text.includes('fibra') || text.includes('roseta')) return 'Infraestructura'
-  if (text.includes('impresora') || text.includes('tóner')) return 'Administración'
-  if (text.includes('correo')) return 'Comercial'
-  if (text.includes('acceso') || text.includes('contraseña')) return 'Sistemas'
-  return 'Operaciones'
+  notifications = repositories.notifications.replaceAll(notifications)
 }
 
 function saveReports() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(reports))
+  reports = repositories.reports.replaceAll(reports)
 }
 
 function getStats() {
@@ -143,24 +73,11 @@ function hasActiveFilters() {
 }
 
 function getFilteredReports() {
-  const query = searchQuery.toLowerCase().trim()
-
-  return reports.filter((r) => {
-    const matchesSearch =
-      r.userName.toLowerCase().includes(query) ||
-      r.contactEmail.toLowerCase().includes(query) ||
-      r.contactPhone.toLowerCase().includes(query) ||
-      r.department.toLowerCase().includes(query) ||
-      r.description.toLowerCase().includes(query) ||
-      formatTicket(r.ticketNumber).toLowerCase().includes(query)
-    const matchesStatus =
-      statusFilter === 'Todos' || r.status === statusFilter
-    const matchesPriority =
-      priorityFilter === 'Todas' || r.priority === priorityFilter
-    const matchesTechnician =
-      technicianFilter === 'Todos' || r.technician === technicianFilter
-
-    return matchesSearch && matchesStatus && matchesPriority && matchesTechnician
+  return filterReports(reports, {
+    query: searchQuery,
+    status: statusFilter,
+    priority: priorityFilter,
+    technician: technicianFilter,
   })
 }
 
@@ -168,30 +85,6 @@ function getReportsCountLabel() {
   if (!hasActiveFilters()) return reports.length
 
   return `${getFilteredReports().length} de ${reports.length}`
-}
-
-function createReport(userName, contactEmail, contactPhone, department, description, priority) {
-  return {
-    id: crypto.randomUUID(),
-    ticketNumber:
-      reports.reduce((highest, report) => Math.max(highest, report.ticketNumber || 0), 0) + 1,
-    userName,
-    contactEmail,
-    contactPhone,
-    department,
-    description,
-    priority,
-    status: STATUSES.PENDING,
-    technician: 'Sin asignar',
-    createdAt: new Date().toISOString(),
-    activity: [
-      {
-        id: crypto.randomUUID(),
-        message: 'Reporte creado',
-        createdAt: new Date().toISOString(),
-      },
-    ],
-  }
 }
 
 function formatDate(iso) {
@@ -310,7 +203,7 @@ function renderHero() {
 function renderReportCard(report) {
   const technicianOptions = getTechnicians().map(
     (technician) =>
-      `<option value="${technician}"${report.technician === technician ? ' selected' : ''}>${technician}</option>`
+      `<option value="${escapeHtml(technician)}"${report.technician === technician ? ' selected' : ''}>${escapeHtml(technician)}</option>`
   ).join('')
   const activity = [...report.activity]
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -323,11 +216,8 @@ function renderReportCard(report) {
       `
     )
     .join('')
-  const deadline = new Date(
-    new Date(report.createdAt).getTime() + settings.sla[report.priority] * 60 * 60 * 1000
-  )
-  const isOverdue =
-    report.status !== STATUSES.RESOLVED && deadline.getTime() < Date.now()
+  const deadline = getSlaDeadline(report, settings.sla)
+  const isOverdue = isSlaOverdue(report, settings.sla)
 
   return `
     <article class="report-card" data-id="${report.id}">
@@ -428,15 +318,7 @@ function renderReportsList() {
     `
   }
 
-  const priorityWeight = { Alta: 3, Media: 2, Baja: 1 }
-  const deadlineFor = (report) =>
-    new Date(report.createdAt).getTime() + settings.sla[report.priority] * 60 * 60 * 1000
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortOrder === 'oldest') return new Date(a.createdAt) - new Date(b.createdAt)
-    if (sortOrder === 'priority') return priorityWeight[b.priority] - priorityWeight[a.priority]
-    if (sortOrder === 'deadline') return deadlineFor(a) - deadlineFor(b)
-    return new Date(b.createdAt) - new Date(a.createdAt)
-  })
+  const sorted = sortReports(filtered, sortOrder, settings.sla)
   return sorted.map(renderReportCard).join('')
 }
 
@@ -585,10 +467,8 @@ function getModuleContent(module) {
   const pendingReports = reports
     .filter((report) => report.status === STATUSES.PENDING)
     .sort((a, b) => {
-      const aDeadline =
-        new Date(a.createdAt).getTime() + settings.sla[a.priority] * 60 * 60 * 1000
-      const bDeadline =
-        new Date(b.createdAt).getTime() + settings.sla[b.priority] * 60 * 60 * 1000
+      const aDeadline = getSlaDeadline(a, settings.sla).getTime()
+      const bDeadline = getSlaDeadline(b, settings.sla).getTime()
       return aDeadline - bDeadline
     })
 
@@ -601,11 +481,8 @@ function getModuleContent(module) {
           <div class="pending-list">
             ${pendingReports
               .map((report) => {
-                const deadline = new Date(
-                  new Date(report.createdAt).getTime() +
-                    settings.sla[report.priority] * 60 * 60 * 1000
-                )
-                const overdue = deadline.getTime() < Date.now()
+                const deadline = getSlaDeadline(report, settings.sla)
+                const overdue = isSlaOverdue(report, settings.sla)
                 return `
                   <article class="pending-item ${overdue ? 'pending-item--overdue' : ''}">
                     <div class="pending-item__top">
@@ -615,7 +492,7 @@ function getModuleContent(module) {
                     <h3>${escapeHtml(report.userName)}</h3>
                     <p>${escapeHtml(report.description)}</p>
                     <div class="pending-item__meta">
-                      <span>${report.technician === 'Sin asignar' ? 'Sin técnico asignado' : escapeHtml(report.technician)}</span>
+                      <span>${report.technician === UNASSIGNED_TECHNICIAN ? 'Sin técnico asignado' : escapeHtml(report.technician)}</span>
                       <time datetime="${deadline.toISOString()}">
                         ${overdue ? 'Vencida: ' : 'Vence: '}${formatDate(deadline.toISOString())}
                       </time>
@@ -637,7 +514,7 @@ function getModuleContent(module) {
           </label>
           <label>Rol
             <select id="profile-role">
-              ${['Administrador', 'Técnico', 'Consulta'].map(
+              ${ROLES.map(
                 (role) => `<option${settings.profile.role === role ? ' selected' : ''}>${role}</option>`
               ).join('')}
             </select>
@@ -940,7 +817,7 @@ function renderDashboardHome() {
         <select id="dashboard-technician" class="filter-select">
           <option value="Todos"${dashboardTechnician === 'Todos' ? ' selected' : ''}>Todos los técnicos</option>
           ${getTechnicians()
-            .filter((technician) => technician !== 'Sin asignar')
+            .filter((technician) => technician !== UNASSIGNED_TECHNICIAN)
             .map(
               (technician) =>
                 `<option value="${escapeHtml(technician)}"${dashboardTechnician === technician ? ' selected' : ''}>${escapeHtml(technician)}</option>`
@@ -1318,9 +1195,7 @@ function bindModuleEvents() {
   })
 
   document.querySelector('#mark-notifications')?.addEventListener('click', () => {
-    notifications.forEach((item) => {
-      item.read = true
-    })
+    notifications = markAllNotificationsAsRead(notifications)
     saveNotifications()
     refreshModule()
   })
@@ -1402,7 +1277,14 @@ function handleSubmit(e) {
   }
   if (!userName || !description) return
 
-  reports.unshift(createReport(userName, contactEmail, contactPhone, department, description, priority))
+  reports.unshift(createReport({
+    userName,
+    contactEmail,
+    contactPhone,
+    department,
+    description,
+    priority,
+  }, reports))
   addNotification(`Nuevo reporte registrado por ${userName}`)
   saveReports()
   isReportFormOpen = false
@@ -1430,7 +1312,7 @@ function handleTechnicianChange(e) {
 
   report.technician = e.currentTarget.value
   const message =
-    report.technician === 'Sin asignar'
+    report.technician === UNASSIGNED_TECHNICIAN
       ? 'Asignación de técnico eliminada'
       : `Reporte asignado a ${report.technician}`
   addActivity(report, message)
@@ -1465,25 +1347,16 @@ function handleCommentKeydown(e) {
 }
 
 function addActivity(report, message) {
-  report.activity.unshift({
-    id: crypto.randomUUID(),
-    message,
-    createdAt: new Date().toISOString(),
-  })
+  report.activity.unshift(createActivity(message))
 }
 
 function addNotification(message) {
-  notifications.unshift({
-    id: crypto.randomUUID(),
-    message,
-    createdAt: new Date().toISOString(),
-    read: false,
-  })
+  notifications.unshift(createNotification(message))
   saveNotifications()
 }
 
 function exportData() {
-  const payload = JSON.stringify({ reports, settings, notifications }, null, 2)
+  const payload = JSON.stringify(createBackup(reports, settings, notifications), null, 2)
   const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }))
   const link = document.createElement('a')
   link.href = url
@@ -1498,11 +1371,10 @@ function importData(event) {
   const reader = new FileReader()
   reader.onload = () => {
     try {
-      const data = JSON.parse(reader.result)
-      if (!Array.isArray(data.reports)) throw new Error('Formato inválido')
+      const data = normalizeBackup(JSON.parse(reader.result))
       reports = data.reports
-      settings = { ...DEFAULT_SETTINGS, ...data.settings }
-      notifications = Array.isArray(data.notifications) ? data.notifications : []
+      settings = data.settings
+      notifications = data.notifications
       saveReports()
       saveSettings()
       saveNotifications()
@@ -1513,12 +1385,6 @@ function importData(event) {
     }
   }
   reader.readAsText(file)
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div')
-  div.textContent = text
-  return div.innerHTML
 }
 
 renderApp()
