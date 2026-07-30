@@ -167,8 +167,9 @@ export const slaResponse = {
 export const backupResponse = {
   type: 'object',
   additionalProperties: false,
-  required: ['reports', 'settings', 'notifications'],
+  required: ['version', 'reports', 'settings', 'notifications'],
   properties: {
+    version: { type: 'integer', const: 1 },
     reports: { type: 'array', items: { $ref: 'Report#' } },
     settings: { $ref: 'Settings#' },
     notifications: { type: 'array', items: { $ref: 'Notification#' } },
@@ -178,11 +179,13 @@ export const backupResponse = {
 export const importResultResponse = {
   type: 'object',
   additionalProperties: false,
-  required: ['reports', 'technicians', 'notifications'],
+  required: ['reports', 'technicians', 'notifications', 'fingerprint', 'duplicate'],
   properties: {
     reports: { type: 'integer', minimum: 0 },
     technicians: { type: 'integer', minimum: 0 },
     notifications: { type: 'integer', minimum: 0 },
+    fingerprint: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    duplicate: { type: 'boolean' },
   },
 }
 

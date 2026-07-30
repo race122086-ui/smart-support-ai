@@ -1495,6 +1495,55 @@ p {
   gap: 0.75rem;
 }
 
+.connection-state,
+.migration-notice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+
+.connection-state {
+  max-width: 640px;
+  margin: 12vh auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.connection-state h2,
+.migration-notice strong {
+  color: var(--text);
+}
+
+.connection-state p,
+.migration-notice p {
+  color: var(--text);
+}
+
+.connection-state--error {
+  border-color: #fecaca;
+}
+
+.migration-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.migration-notice p {
+  margin: 0.35rem 0 0;
+}
+
+@media (max-width: 700px) {
+  .migration-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .import-label input {
   display: none;
 }

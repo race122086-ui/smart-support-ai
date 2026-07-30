@@ -1,5 +1,43 @@
 # SmartSupport API
 
+API Fastify con persistencia PostgreSQL mediante Prisma.
+
+## Entorno local
+
+Desde la raíz del repositorio:
+
+```sh
+docker compose up -d postgres
+copy .env.example .env
+npm install
+npm run db:deploy
+npm run db:seed
+npm run dev:api
+```
+
+La API queda en `http://127.0.0.1:3000`, la documentación OpenAPI en
+`http://127.0.0.1:3000/documentation` y la comprobación de salud en `/health`.
+En otra terminal, `npm run dev` inicia la SPA en `http://localhost:5173`.
+
+Para crear una migración durante desarrollo usa `npm run db:migrate`. En
+despliegues usa `npm run db:deploy`; este último no modifica migraciones ya
+versionadas.
+
+## Pruebas con PostgreSQL
+
+Las pruebas unitarias usan el repositorio en memoria. Las pruebas de integración
+se habilitan con una base exclusiva:
+
+```sh
+$env:TEST_DATABASE_URL='postgresql://smartsupport:smartsupport@localhost:5432/smartsupport_test?schema=public'
+$env:DATABASE_URL=$env:TEST_DATABASE_URL
+npm run db:deploy
+npm test
+```
+
+No apuntes `TEST_DATABASE_URL` a una base con datos importantes: las pruebas de
+integración limpian sus tablas operativas.
+
 API local Fastify de SmartSupport. Durante el plan 1 usa un repositorio en
 memoria: al reiniciar el proceso se pierden sus datos y la SPA continúa usando
 `localStorage`.

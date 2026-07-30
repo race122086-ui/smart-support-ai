@@ -7,6 +7,7 @@ import {
   STATUSES,
   UNASSIGNED_TECHNICIAN,
 } from '@smartsupport/contracts'
+import { createHash } from 'node:crypto'
 import { DomainError, notFound, validationError } from '../errors/domain-error.js'
 
 const priorityWeight = { Alta: 3, Media: 2, Baja: 1 }
@@ -32,6 +33,22 @@ function positiveInteger(value, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback
 }
 
+function deterministicUuid(value) {
+  const hex = createHash('sha256').update(value).digest('hex')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+function safeUuid(value, namespace) {
+  const normalized = normalizedText(value).toLowerCase()
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalized)
+    ? normalized
+    : deterministicUuid(`${namespace}:${normalized || 'missing'}`)
+}
+
+function backupFingerprint(backup) {
+  return createHash('sha256').update(JSON.stringify(backup)).digest('hex')
+}
+
 export class SupportService {
   constructor(repository, options = {}) {
     this.repository = repository
@@ -47,8 +64,8 @@ export class SupportService {
     return { id: this.idFactory(), message, createdAt: now }
   }
 
-  async notify(message, now = this.now()) {
-    return this.repository.saveNotification({
+  async notify(message, now = this.now(), repository = this.repository) {
+    return repository.saveNotification({
       id: this.idFactory(),
       message,
       createdAt: now,
@@ -98,54 +115,60 @@ export class SupportService {
   }
 
   async createReport(input) {
-    const reports = await this.repository.listReports()
-    const ticketNumber = reports.reduce(
-      (highest, report) => Math.max(highest, positiveInteger(report.ticketNumber, 0)),
-      0
-    ) + 1
-    const now = this.now()
-    const report = {
-      id: this.idFactory(),
-      ticketNumber,
-      ...Object.fromEntries(
-        editableFields.map((field) => [
-          field,
-          typeof input[field] === 'string' ? input[field].trim() : input[field],
-        ])
-      ),
-      status: 'Pendiente',
-      technician: UNASSIGNED_TECHNICIAN,
-      createdAt: now,
-      activity: [this.activity('Reporte creado', now)],
-    }
-    await this.repository.saveReport(report)
-    await this.notify(`Se creó el reporte INC-${String(ticketNumber).padStart(4, '0')}`, now)
-    return report
+    return this.repository.transaction(async (repository) => {
+      const ticketNumber = await repository.nextTicketNumber()
+      const now = this.now()
+      const report = {
+        id: this.idFactory(),
+        ticketNumber,
+        ...Object.fromEntries(
+          editableFields.map((field) => [
+            field,
+            typeof input[field] === 'string' ? input[field].trim() : input[field],
+          ])
+        ),
+        status: 'Pendiente',
+        technician: UNASSIGNED_TECHNICIAN,
+        createdAt: now,
+        activity: [this.activity('Reporte creado', now)],
+      }
+      await repository.saveReport(report)
+      await this.notify(
+        `Se creó el reporte INC-${String(ticketNumber).padStart(4, '0')}`,
+        now,
+        repository
+      )
+      return report
+    })
   }
 
   async updateReport(id, changes) {
-    const report = await this.getReport(id)
-    for (const field of editableFields) {
-      if (field in changes) {
-        report[field] = typeof changes[field] === 'string'
-          ? changes[field].trim()
-          : changes[field]
+    return this.repository.transaction(async (repository) => {
+      const report = await repository.getReport(id)
+      if (!report) throw notFound('Reporte')
+      for (const field of editableFields) {
+        if (field in changes) {
+          report[field] = typeof changes[field] === 'string'
+            ? changes[field].trim()
+            : changes[field]
+        }
       }
-    }
-    const now = this.now()
-    report.activity.push(this.activity('Reporte actualizado', now))
-    await this.repository.saveReport(report)
-    await this.notify(`Se actualizó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now)
-    return report
+      const now = this.now()
+      report.activity.push(this.activity('Reporte actualizado', now))
+      await repository.saveReport(report)
+      await this.notify(`Se actualizó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now, repository)
+      return report
+    })
   }
 
   async deleteReport(id) {
-    await this.getReport(id)
-    await this.repository.removeReport(id)
+    return this.repository.transaction(async (repository) => {
+      if (!await repository.getReport(id)) throw notFound('Reporte')
+      await repository.removeReport(id)
+    })
   }
 
   async changeStatus(id, status) {
-    const report = await this.getReport(id)
     if (!STATUSES.includes(status)) {
       throw new DomainError(
         'INVALID_STATUS_TRANSITION',
@@ -153,48 +176,58 @@ export class SupportService {
         409
       )
     }
-    const now = this.now()
-    report.status = status
-    report.activity.push(this.activity(`Estado cambiado a ${status}`, now))
-    await this.repository.saveReport(report)
-    await this.notify(`El reporte INC-${String(report.ticketNumber).padStart(4, '0')} cambió a ${status}`, now)
-    return report
+    return this.repository.transaction(async (repository) => {
+      const report = await repository.getReport(id)
+      if (!report) throw notFound('Reporte')
+      const now = this.now()
+      report.status = status
+      report.activity.push(this.activity(`Estado cambiado a ${status}`, now))
+      await repository.saveReport(report)
+      await this.notify(`El reporte INC-${String(report.ticketNumber).padStart(4, '0')} cambió a ${status}`, now, repository)
+      return report
+    })
   }
 
   async assignTechnician(id, technicianName) {
-    const report = await this.getReport(id)
-    if (technicianName !== UNASSIGNED_TECHNICIAN) {
-      const technicians = await this.repository.listTechnicians()
-      const available = technicians.some(
-        (technician) => technician.active && technician.name === technicianName
-      )
-      if (!available) {
-        throw new DomainError(
-          'TECHNICIAN_NOT_AVAILABLE',
-          'El técnico no está disponible',
-          422
+    return this.repository.transaction(async (repository) => {
+      const report = await repository.getReport(id)
+      if (!report) throw notFound('Reporte')
+      if (technicianName !== UNASSIGNED_TECHNICIAN) {
+        const technicians = await repository.listTechnicians()
+        const available = technicians.some(
+          (technician) => technician.active && technician.name === technicianName
         )
+        if (!available) {
+          throw new DomainError(
+            'TECHNICIAN_NOT_AVAILABLE',
+            'El técnico no está disponible',
+            422
+          )
+        }
       }
-    }
-    const now = this.now()
-    report.technician = technicianName
-    const message = technicianName === UNASSIGNED_TECHNICIAN
-      ? 'Asignación de técnico retirada'
-      : `Asignado a ${technicianName}`
-    report.activity.push(this.activity(message, now))
-    await this.repository.saveReport(report)
-    await this.notify(`Se actualizó la asignación del reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now)
-    return report
+      const now = this.now()
+      report.technician = technicianName
+      const message = technicianName === UNASSIGNED_TECHNICIAN
+        ? 'Asignación de técnico retirada'
+        : `Asignado a ${technicianName}`
+      report.activity.push(this.activity(message, now))
+      await repository.saveReport(report)
+      await this.notify(`Se actualizó la asignación del reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now, repository)
+      return report
+    })
   }
 
   async addComment(id, message) {
-    const report = await this.getReport(id)
-    const now = this.now()
-    const activity = this.activity(`Comentario: ${message.trim()}`, now)
-    report.activity.push(activity)
-    await this.repository.saveReport(report)
-    await this.notify(`Se comentó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now)
-    return activity
+    return this.repository.transaction(async (repository) => {
+      const report = await repository.getReport(id)
+      if (!report) throw notFound('Reporte')
+      const now = this.now()
+      const activity = this.activity(`Comentario: ${message.trim()}`, now)
+      report.activity.push(activity)
+      await repository.saveReport(report)
+      await this.notify(`Se comentó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now, repository)
+      return activity
+    })
   }
 
   async getActivity(id) {
@@ -252,35 +285,39 @@ export class SupportService {
 
   async addTechnician(name) {
     const normalizedName = name.trim()
-    const technicians = await this.repository.listTechnicians()
-    if (technicians.some(
-      (technician) => technician.name.toLowerCase() === normalizedName.toLowerCase()
-    )) {
-      throw new DomainError(
-        'TECHNICIAN_ALREADY_EXISTS',
-        'Ya existe un técnico con ese nombre',
-        409
-      )
-    }
-    const technician = { id: this.idFactory(), name: normalizedName, active: true }
-    await this.repository.saveTechnician(technician)
-    await this.notify(`Se agregó al técnico ${normalizedName}`)
-    return technician
+    return this.repository.transaction(async (repository) => {
+      const technicians = await repository.listTechnicians()
+      if (technicians.some(
+        (technician) => technician.name.toLowerCase() === normalizedName.toLowerCase()
+      )) {
+        throw new DomainError(
+          'TECHNICIAN_ALREADY_EXISTS',
+          'Ya existe un técnico con ese nombre',
+          409
+        )
+      }
+      const technician = { id: this.idFactory(), name: normalizedName, active: true }
+      await repository.saveTechnician(technician)
+      await this.notify(`Se agregó al técnico ${normalizedName}`, this.now(), repository)
+      return technician
+    })
   }
 
   async deleteTechnician(id) {
-    const technicians = await this.repository.listTechnicians()
-    const technician = technicians.find((item) => item.id === id)
-    if (!technician) throw notFound('Technician')
-    const reports = await this.repository.listReports()
-    if (reports.some((report) => report.technician === technician.name)) {
-      throw new DomainError(
-        'TECHNICIAN_HAS_REPORTS',
-        'El técnico tiene reportes asignados',
-        409
-      )
-    }
-    await this.repository.removeTechnician(id)
+    return this.repository.transaction(async (repository) => {
+      const technicians = await repository.listTechnicians()
+      const technician = technicians.find((item) => item.id === id)
+      if (!technician) throw notFound('Technician')
+      const reports = await repository.listReports()
+      if (reports.some((report) => report.technician === technician.name)) {
+        throw new DomainError(
+          'TECHNICIAN_HAS_REPORTS',
+          'El técnico tiene reportes asignados',
+          409
+        )
+      }
+      await repository.removeTechnician(id)
+    })
   }
 
   async getSettings() {
@@ -297,12 +334,18 @@ export class SupportService {
   }
 
   async updateSettings(changes) {
-    const settings = await this.repository.getSettings()
-    if (changes.profile) settings.profile = { ...settings.profile, ...changes.profile }
-    if (changes.sla) settings.sla = { ...settings.sla, ...changes.sla }
-    await this.repository.saveSettings(settings)
-    await this.notify('Se actualizó la configuración')
-    return this.getSettings()
+    return this.repository.transaction(async (repository) => {
+      const settings = await repository.getSettings()
+      if (changes.profile) settings.profile = { ...settings.profile, ...changes.profile }
+      if (changes.sla) settings.sla = { ...settings.sla, ...changes.sla }
+      await repository.saveSettings(settings)
+      await this.notify('Se actualizó la configuración', this.now(), repository)
+      const technicians = await repository.listTechnicians()
+      return {
+        ...settings,
+        technicians: technicians.filter((item) => item.active).map((item) => item.name),
+      }
+    })
   }
 
   async listNotifications() {
@@ -317,17 +360,20 @@ export class SupportService {
   }
 
   async exportBackup() {
-    const snapshot = await this.repository.snapshot()
-    return {
-      reports: snapshot.reports,
-      settings: {
-        ...snapshot.settings,
-        technicians: snapshot.technicians
-          .filter((technician) => technician.active)
-          .map((technician) => technician.name),
-      },
-      notifications: snapshot.notifications,
-    }
+    return this.repository.transaction(async (repository) => {
+      const snapshot = await repository.snapshot()
+      return {
+        version: 1,
+        reports: snapshot.reports,
+        settings: {
+          ...snapshot.settings,
+          technicians: snapshot.technicians
+            .filter((technician) => technician.active)
+            .map((technician) => technician.name),
+        },
+        notifications: snapshot.notifications,
+      }
+    })
   }
 
   normalizeImportedReport(source, index, now) {
@@ -337,7 +383,8 @@ export class SupportService {
       ])
     }
     const ticketNumber = positiveInteger(source.ticketNumber, index + 1)
-    const id = normalizedText(source.id) || `reporte-${ticketNumber}`
+    const sourceId = normalizedText(source.id) || `reporte-${ticketNumber}`
+    const id = safeUuid(source.id, normalizedText(source.id) ? 'report' : `report:${ticketNumber}`)
     const userName = normalizedText(source.userName)
     const description = normalizedText(source.description)
     return {
@@ -354,7 +401,10 @@ export class SupportService {
       createdAt: isoDate(source.createdAt, now),
       activity: Array.isArray(source.activity)
         ? source.activity.map((item, activityIndex) => ({
-            id: normalizedText(item?.id) || `${id}-actividad-${activityIndex + 1}`,
+            id: safeUuid(
+              item?.id,
+              `activity:${sourceId}:${activityIndex + 1}`
+            ),
             message: normalizedText(item?.message),
             createdAt: isoDate(item?.createdAt, now),
           }))
@@ -370,6 +420,14 @@ export class SupportService {
         400
       )
     }
+    if (backup.version !== undefined && backup.version !== 1) {
+      throw new DomainError(
+        'UNSUPPORTED_BACKUP_VERSION',
+        'La versión del respaldo no es compatible',
+        400
+      )
+    }
+    const fingerprint = backupFingerprint(backup)
     const now = this.now()
     const reports = backup.reports.map((report, index) =>
       this.normalizeImportedReport(report, index, now)
@@ -391,17 +449,23 @@ export class SupportService {
         ]
       })),
     }
-    const technicianNames = Array.isArray(backup.settings?.technicians)
+    const configuredTechnicianNames = Array.isArray(backup.settings?.technicians)
       ? [...new Set(backup.settings.technicians.map(normalizedText).filter(Boolean))]
       : ['Ana Torres', 'Carlos Ruiz', 'Laura Méndez']
+    const technicianNames = [...new Map([
+      ...configuredTechnicianNames,
+      ...reports
+        .map((report) => report.technician)
+        .filter((name) => name !== UNASSIGNED_TECHNICIAN),
+    ].map((name) => [name.toLocaleLowerCase('es-MX'), name])).values()]
     const technicians = technicianNames.map((name) => ({
-      id: this.idFactory(),
+      id: deterministicUuid(`technician:${name.toLocaleLowerCase('es-MX')}`),
       name,
       active: true,
     }))
     const notifications = Array.isArray(backup.notifications)
       ? backup.notifications.map((item, index) => ({
-          id: normalizedText(item?.id) || `notificacion-${index + 1}`,
+          id: safeUuid(item?.id, `notification:${index + 1}:${item?.message || ''}`),
           message: normalizedText(item?.message),
           createdAt: isoDate(item?.createdAt, now),
           read: item?.read === true,
@@ -420,11 +484,19 @@ export class SupportService {
       ids.add(report.id)
       tickets.add(report.ticketNumber)
     }
-    await this.repository.replace({ reports, settings, technicians, notifications })
-    return {
+    const result = {
       reports: reports.length,
       technicians: technicians.length,
       notifications: notifications.length,
+      fingerprint,
+      duplicate: false,
     }
+    return this.repository.transaction(async (repository) => {
+      const previous = await repository.getImport(fingerprint)
+      if (previous) return { ...previous.result, duplicate: true }
+      await repository.replace({ reports, settings, technicians, notifications })
+      await repository.saveImport(fingerprint, result)
+      return result
+    })
   }
 }

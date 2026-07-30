@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildApp } from '../src/app.js'
+import { MemoryRepository } from '../src/repositories/memory-repository.js'
 
 const validReport = {
   userName: 'María López',
@@ -21,6 +22,7 @@ async function createTestApp() {
       corsOrigin: 'http://localhost:5173',
       logLevel: 'silent',
     },
+    repository: new MemoryRepository(),
     serviceOptions: {
       clock: () => new Date('2026-07-29T12:00:00.000Z'),
       idFactory: () => `id-${++sequence}`,
@@ -270,4 +272,13 @@ test('exporta e importa respaldos de forma atómica', async (t) => {
   })
   assert.equal(imported.statusCode, 200)
   assert.equal(imported.json().reports, 1)
+  assert.equal(imported.json().duplicate, false)
+
+  const repeated = await app.inject({
+    method: 'POST',
+    url: '/api/v1/backups/import',
+    payload: exported.json(),
+  })
+  assert.equal(repeated.statusCode, 200)
+  assert.equal(repeated.json().duplicate, true)
 })

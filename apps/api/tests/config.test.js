@@ -8,6 +8,7 @@ test('carga valores predeterminados seguros para desarrollo local', () => {
     port: 3000,
     corsOrigin: 'http://localhost:5173',
     logLevel: 'info',
+    databaseUrl: 'postgresql://smartsupport:smartsupport@localhost:5432/smartsupport?schema=public',
   })
 })
 

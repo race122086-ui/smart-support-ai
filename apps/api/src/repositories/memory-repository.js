@@ -18,6 +18,30 @@ export class MemoryRepository {
       technicians: clone(initialState.technicians || defaultTechnicians),
       notifications: clone(initialState.notifications || []),
     }
+    this.imports = new Map()
+  }
+
+  async transaction(work) {
+    const state = clone(this.state)
+    const imports = new Map(this.imports)
+    try {
+      return await work(this)
+    } catch (error) {
+      this.state = state
+      this.imports = imports
+      throw error
+    }
+  }
+
+  async nextTicketNumber() {
+    return this.state.reports.reduce(
+      (highest, report) => Math.max(highest, Number(report.ticketNumber) || 0),
+      0
+    ) + 1
+  }
+
+  async health() {
+    return true
   }
 
   async snapshot() {
@@ -89,5 +113,15 @@ export class MemoryRepository {
   async replaceNotifications(notifications) {
     this.state.notifications = clone(notifications)
     return clone(notifications)
+  }
+
+  async getImport(fingerprint) {
+    return this.imports.has(fingerprint)
+      ? { fingerprint, result: clone(this.imports.get(fingerprint)) }
+      : null
+  }
+
+  async saveImport(fingerprint, result) {
+    this.imports.set(fingerprint, clone(result))
   }
 }

@@ -1,20 +1,15 @@
 import './style.css'
 import {
   DEPARTMENTS,
+  DEFAULT_SETTINGS,
   PRIORITIES,
   ROLES,
   STATUSES,
   UNASSIGNED_TECHNICIAN,
 } from './domain/constants.js'
-import { createBackup, normalizeBackup } from './domain/backups.js'
-import {
-  createNotification,
-  markAllNotificationsAsRead,
-} from './domain/notifications.js'
+import { normalizeBackup } from './domain/backups.js'
 import {
   calculateStats,
-  createActivity,
-  createReport,
   filterReports,
   formatTicket,
   getSlaDeadline,
@@ -23,13 +18,18 @@ import {
 } from './domain/reports.js'
 import { getTechnicians as getDomainTechnicians } from './domain/settings.js'
 import { escapeHtml } from './domain/text.js'
-import { createLocalRepositories } from './persistence/local-storage.js'
+import { api } from './persistence/api-client.js'
+import {
+  getLegacyMigration,
+  markLegacyMigrationComplete,
+} from './persistence/legacy-migration.js'
 
-const repositories = createLocalRepositories()
-
-let reports = repositories.reports.list()
-let settings = repositories.settings.get()
-let notifications = repositories.notifications.list()
+let reports = []
+let settings = structuredClone(DEFAULT_SETTINGS)
+let notifications = []
+let apiLoading = true
+let apiError = ''
+let legacyMigration = getLegacyMigration()
 let searchQuery = ''
 let statusFilter = 'Todos'
 let priorityFilter = 'Todas'
@@ -43,20 +43,44 @@ let isReportFormOpen = false
 let currentView = 'dashboard'
 let openActivityReportId = null
 
-function saveSettings() {
-  settings = repositories.settings.update(settings)
-}
-
 function getTechnicians() {
   return getDomainTechnicians(settings)
 }
 
-function saveNotifications() {
-  notifications = repositories.notifications.replaceAll(notifications)
+async function loadRemoteState() {
+  apiLoading = true
+  apiError = ''
+  renderApp()
+  try {
+    const state = await api.loadState()
+    reports = state.reports
+    settings = state.settings
+    notifications = state.notifications
+  } catch (error) {
+    apiError = error.message || 'No se pudo conectar con la API'
+  } finally {
+    apiLoading = false
+    renderApp()
+  }
 }
 
-function saveReports() {
-  reports = repositories.reports.replaceAll(reports)
+async function runMutation(action, successMessage) {
+  try {
+    await action()
+    const state = await api.loadState()
+    reports = state.reports
+    settings = state.settings
+    notifications = state.notifications
+    apiError = ''
+    renderApp()
+    if (successMessage) showToast(successMessage)
+    return true
+  } catch (error) {
+    apiError = error.message || 'No se pudo completar la operación'
+    renderApp()
+    showToast(apiError, 'error')
+    return false
+  }
 }
 
 function getStats() {
@@ -923,6 +947,31 @@ function renderWorkspaceView() {
   return renderDashboardHome()
 }
 
+function renderConnectionState() {
+  if (apiLoading) {
+    return '<section class="connection-state" aria-live="polite"><h2>Cargando datos…</h2><p>Conectando con SmartSupport API.</p></section>'
+  }
+  if (apiError) {
+    return `<section class="connection-state connection-state--error" role="alert"><h2>No se pudieron cargar los datos</h2><p>${escapeHtml(apiError)}</p><button id="retry-api" class="btn btn--primary" type="button">Reintentar</button></section>`
+  }
+  return ''
+}
+
+function renderMigrationNotice() {
+  if (!legacyMigration || apiLoading || apiError) return ''
+  const { reports: reportCount, technicians, notifications: notificationCount } =
+    legacyMigration.counts
+  return `
+    <aside class="migration-notice" aria-labelledby="migration-title">
+      <div>
+        <strong id="migration-title">Hay datos anteriores disponibles</strong>
+        <p>${reportCount} reportes, ${technicians} técnicos y ${notificationCount} notificaciones pueden importarse. Se descargará un respaldo antes de migrarlos y los originales no se borrarán.</p>
+      </div>
+      <button id="migrate-local-data" class="btn btn--primary" type="button">Respaldar e importar</button>
+    </aside>
+  `
+}
+
 function renderApp() {
   const app = document.querySelector('#app')
   app.innerHTML = `
@@ -943,7 +992,7 @@ function renderApp() {
           <button type="button" data-view="metrics" class="${currentView === 'metrics' ? 'is-active' : ''}">${moduleIcon('metrics')}<b>Reportes</b></button>
           <button type="button" data-view="settings" class="${currentView === 'settings' ? 'is-active' : ''}">${moduleIcon('sla')}<b>Configuración</b></button>
         </nav>
-        <div class="sidebar-footer"><span><i></i>Todos los sistemas operativos</span><small>Datos almacenados localmente</small></div>
+        <div class="sidebar-footer"><span><i></i>Todos los sistemas operativos</span><small>Datos persistidos en PostgreSQL</small></div>
       </aside>
       <section class="app-workspace">
         <header class="app-topbar">
@@ -968,7 +1017,7 @@ function renderApp() {
             </div>
           </div>
         </header>
-        <main class="workspace-content">${renderWorkspaceView()}</main>
+        <main class="workspace-content">${renderConnectionState() || `${renderMigrationNotice()}${renderWorkspaceView()}`}</main>
       </section>
       ${renderModuleModal()}
       ${renderEditModal()}
@@ -998,6 +1047,11 @@ function updateUI() {
 }
 
 function bindEvents() {
+  document.querySelector('#retry-api')?.addEventListener('click', loadRemoteState)
+  document.querySelector('#migrate-local-data')?.addEventListener('click', migrateLegacyData)
+
+  if (apiLoading || apiError) return
+
   const form = document.querySelector('#report-form')
   form?.addEventListener('submit', handleSubmit)
 
@@ -1119,22 +1173,24 @@ function closeEdit() {
   renderApp()
 }
 
-function saveEditedReport(event) {
+async function saveEditedReport(event) {
   event.preventDefault()
   const report = reports.find((item) => item.id === editingReportId)
   if (!report) return
 
-  report.userName = document.querySelector('#edit-user').value.trim()
-  report.contactEmail = document.querySelector('#edit-email').value.trim()
-  report.contactPhone = document.querySelector('#edit-phone').value.trim()
-  report.department = document.querySelector('#edit-department').value
-  report.description = document.querySelector('#edit-description').value.trim()
-  report.priority = document.querySelector('#edit-priority').value
-  addActivity(report, 'Información del reporte actualizada')
-  saveReports()
+  const changes = {
+    userName: document.querySelector('#edit-user').value.trim(),
+    contactEmail: document.querySelector('#edit-email').value.trim(),
+    contactPhone: document.querySelector('#edit-phone').value.trim(),
+    department: document.querySelector('#edit-department').value,
+    description: document.querySelector('#edit-description').value.trim(),
+    priority: document.querySelector('#edit-priority').value,
+  }
   editingReportId = null
-  renderApp()
-  showToast(`${formatTicket(report.ticketNumber)} actualizado correctamente`)
+  await runMutation(
+    () => api.updateReport(report.id, changes),
+    `${formatTicket(report.ticketNumber)} actualizado correctamente`
+  )
 }
 
 function openDelete(id) {
@@ -1147,14 +1203,16 @@ function closeDelete() {
   renderApp()
 }
 
-function confirmDelete() {
+async function confirmDelete() {
   const report = reports.find((item) => item.id === deletingReportId)
   if (!report) return
-  reports = reports.filter((item) => item.id !== deletingReportId)
-  saveReports()
+  const id = deletingReportId
   deletingReportId = null
-  renderApp()
-  showToast(`${formatTicket(report.ticketNumber)} eliminado`, 'danger')
+  const removed = await runMutation(
+    () => api.deleteReport(id),
+    ''
+  )
+  if (removed) showToast(`${formatTicket(report.ticketNumber)} eliminado`, 'danger')
 }
 
 function refreshModule() {
@@ -1164,40 +1222,37 @@ function refreshModule() {
 function bindModuleEvents() {
   document.querySelector('#profile-form')?.addEventListener('submit', (event) => {
     event.preventDefault()
-    settings.profile = {
+    const profile = {
       name: document.querySelector('#profile-name').value.trim(),
       role: document.querySelector('#profile-role').value,
     }
-    saveSettings()
-    addNotification(`Perfil actualizado: ${settings.profile.name} (${settings.profile.role})`)
-    refreshModule()
+    runMutation(
+      () => api.updateSettings({ profile }),
+      `Perfil actualizado: ${profile.name} (${profile.role})`
+    )
   })
 
   document.querySelector('#technician-form')?.addEventListener('submit', (event) => {
     event.preventDefault()
     const input = document.querySelector('#new-technician')
     const name = input.value.trim()
-    if (!name || settings.technicians.includes(name)) return
-    settings.technicians.push(name)
-    saveSettings()
-    addNotification(`Técnico agregado: ${name}`)
-    refreshModule()
+    if (!name || settings.technicians.some(
+      (technician) => technician.toLocaleLowerCase('es-MX') === name.toLocaleLowerCase('es-MX')
+    )) return
+    runMutation(() => api.addTechnician(name), `Técnico agregado: ${name}`)
   })
 
   document.querySelector('#sla-form')?.addEventListener('submit', (event) => {
     event.preventDefault()
-    PRIORITIES.forEach((priority) => {
-      settings.sla[priority] = Number(document.querySelector(`#sla-${priority}`).value)
-    })
-    saveSettings()
-    addNotification('Tiempos de respuesta actualizados')
-    refreshModule()
+    const sla = Object.fromEntries(PRIORITIES.map((priority) => [
+      priority,
+      Number(document.querySelector(`#sla-${priority}`).value),
+    ]))
+    runMutation(() => api.updateSettings({ sla }), 'Tiempos de respuesta actualizados')
   })
 
   document.querySelector('#mark-notifications')?.addEventListener('click', () => {
-    notifications = markAllNotificationsAsRead(notifications)
-    saveNotifications()
-    refreshModule()
+    runMutation(() => api.markNotificationsRead(), 'Notificaciones marcadas como leídas')
   })
 
   document.querySelector('#export-data')?.addEventListener('click', exportData)
@@ -1255,7 +1310,7 @@ function bindReportActions() {
   })
 }
 
-function handleSubmit(e) {
+async function handleSubmit(e) {
   e.preventDefault()
   const form = e.target
   const userName = form.userName.value.trim()
@@ -1277,64 +1332,53 @@ function handleSubmit(e) {
   }
   if (!userName || !description) return
 
-  reports.unshift(createReport({
-    userName,
-    contactEmail,
-    contactPhone,
-    department,
-    description,
-    priority,
-  }, reports))
-  addNotification(`Nuevo reporte registrado por ${userName}`)
-  saveReports()
   isReportFormOpen = false
   currentView = 'tickets'
-  renderApp()
-  showToast('Reporte registrado correctamente')
+  await runMutation(
+    () => api.createReport({
+      userName,
+      contactEmail,
+      contactPhone,
+      department,
+      description,
+      priority,
+    }),
+    'Reporte registrado correctamente'
+  )
 }
 
-function handleStatusChange(e) {
+async function handleStatusChange(e) {
   const report = reports.find((item) => item.id === e.currentTarget.dataset.id)
   if (!report) return
 
-  report.status = e.currentTarget.value
-
-  addActivity(report, `Estado cambiado a ${report.status.toLowerCase()}`)
-  addNotification(`${report.userName}: estado cambiado a ${report.status.toLowerCase()}`)
-  saveReports()
-  renderApp()
-  showToast(`${formatTicket(report.ticketNumber)} cambió a ${report.status.toLowerCase()}`)
+  const status = e.currentTarget.value
+  await runMutation(
+    () => api.changeStatus(report.id, status),
+    `${formatTicket(report.ticketNumber)} cambió a ${status.toLowerCase()}`
+  )
 }
 
-function handleTechnicianChange(e) {
+async function handleTechnicianChange(e) {
   const report = reports.find((item) => item.id === e.currentTarget.dataset.id)
   if (!report) return
 
-  report.technician = e.currentTarget.value
+  const technician = e.currentTarget.value
   const message =
-    report.technician === UNASSIGNED_TECHNICIAN
+    technician === UNASSIGNED_TECHNICIAN
       ? 'Asignación de técnico eliminada'
-      : `Reporte asignado a ${report.technician}`
-  addActivity(report, message)
-  addNotification(`${report.userName}: ${message}`)
-  saveReports()
-  updateUI()
-  showToast(message)
+      : `Reporte asignado a ${technician}`
+  await runMutation(() => api.assignTechnician(report.id, technician), message)
 }
 
-function handleAddComment(e) {
+async function handleAddComment(e) {
   const id = e.currentTarget.dataset.id
   const input = document.querySelector(`.comment-input[data-id="${id}"]`)
   const report = reports.find((item) => item.id === id)
   const comment = input?.value.trim()
   if (!report || !comment) return
 
-  addActivity(report, `Comentario: ${comment}`)
-  addNotification(`${report.userName}: nuevo comentario agregado`)
   openActivityReportId = id
-  saveReports()
-  updateUI()
-  showToast('Comentario agregado al historial')
+  await runMutation(() => api.addComment(id, comment), 'Comentario agregado al historial')
 }
 
 function handleCommentKeydown(e) {
@@ -1346,45 +1390,55 @@ function handleCommentKeydown(e) {
   button?.click()
 }
 
-function addActivity(report, message) {
-  report.activity.unshift(createActivity(message))
-}
-
-function addNotification(message) {
-  notifications.unshift(createNotification(message))
-  saveNotifications()
-}
-
-function exportData() {
-  const payload = JSON.stringify(createBackup(reports, settings, notifications), null, 2)
+function downloadBackup(backup, prefix = 'smartsupport-respaldo') {
+  const payload = JSON.stringify(backup, null, 2)
   const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }))
   const link = document.createElement('a')
   link.href = url
-  link.download = `smartsupport-respaldo-${new Date().toISOString().slice(0, 10)}.json`
+  link.download = `${prefix}-${new Date().toISOString().slice(0, 10)}.json`
   link.click()
   URL.revokeObjectURL(url)
+}
+
+async function exportData() {
+  try {
+    downloadBackup(await api.exportBackup())
+  } catch (error) {
+    showToast(error.message || 'No se pudo exportar el respaldo', 'error')
+  }
 }
 
 function importData(event) {
   const file = event.target.files[0]
   if (!file) return
   const reader = new FileReader()
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const data = normalizeBackup(JSON.parse(reader.result))
-      reports = data.reports
-      settings = data.settings
-      notifications = data.notifications
-      saveReports()
-      saveSettings()
-      saveNotifications()
       activeModule = null
-      renderApp()
-    } catch {
-      window.alert('No se pudo importar el respaldo. Verifica el archivo.')
+      await runMutation(() => api.importBackup(data), 'Respaldo importado correctamente')
+    } catch (error) {
+      window.alert(error.message || 'No se pudo importar el respaldo. Verifica el archivo.')
     }
   }
   reader.readAsText(file)
 }
 
+async function migrateLegacyData() {
+  if (!legacyMigration) return
+  downloadBackup(legacyMigration.backup, 'smartsupport-respaldo-local')
+  const completed = await runMutation(
+    async () => {
+      const result = await api.importBackup(legacyMigration.backup)
+      markLegacyMigrationComplete(result.fingerprint)
+      legacyMigration = null
+    },
+    'Datos anteriores importados correctamente'
+  )
+  if (!completed) {
+    showToast('La importación no se aplicó; los datos locales siguen disponibles', 'error')
+  }
+}
+
 renderApp()
+loadRemoteState()

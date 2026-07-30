@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Report {
+  id           String           @id @default(uuid()) @db.Uuid
+  ticketNumber Int              @unique @map("ticket_number")
+  userName     String           @map("user_name")
+  contactEmail String           @map("contact_email")
+  contactPhone String           @map("contact_phone")
+  department   String
+  description  String
+  priority     String
+  status       String
+  technicianId String?          @map("technician_id") @db.Uuid
+  technician   Technician?      @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  activities   ReportActivity[]
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status])
+  @@index([priority])
+  @@index([technicianId])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model ReportActivity {
+  id        String   @id @default(uuid()) @db.Uuid
+  reportId  String   @map("report_id") @db.Uuid
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  type      String   @default("activity")
+  message   String
+  actor     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([reportId, createdAt])
+  @@map("report_activities")
+}
+
+model Technician {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String
+  normalizedName String   @unique @map("normalized_name")
+  active         Boolean  @default(true)
+  reports        Report[]
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("technicians")
+}
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  recipientId String?   @map("recipient_id")
+  message     String
+  type        String    @default("info")
+  readAt      DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model Profile {
+  id        Int      @id @default(1)
+  name      String
+  role      String
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("profiles")
+}
+
+model SlaSetting {
+  priority  String   @id
+  hours     Int
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("sla_settings")
+}
+
+model Counter {
+  name  String @id
+  value Int
+
+  @@map("counters")
+}
+
+model BackupImport {
+  fingerprint String   @id
+  result      Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("backup_imports")
+}

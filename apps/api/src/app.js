@@ -6,6 +6,7 @@ import { API_PREFIX } from '@smartsupport/contracts'
 import { loadConfig } from './config.js'
 import { DomainError } from './errors/domain-error.js'
 import { MemoryRepository } from './repositories/memory-repository.js'
+import { PrismaRepository } from './repositories/prisma-repository.js'
 import { apiRoutes, sharedSchemas } from './routes/api-routes.js'
 import { SupportService } from './services/support-service.js'
 
@@ -28,8 +29,14 @@ export async function buildApp(options = {}) {
       },
     },
   })
-  const repository = options.repository || new MemoryRepository()
+  const repository = options.repository || (
+    config.databaseUrl
+      ? new PrismaRepository(undefined, { datasourceUrl: config.databaseUrl })
+      : new MemoryRepository()
+  )
   const service = options.service || new SupportService(repository, options.serviceOptions)
+
+  if (repository.connect) await repository.connect()
 
   await app.register(cors, {
     origin: config.corsOrigin,
@@ -72,7 +79,10 @@ export async function buildApp(options = {}) {
         },
       },
     },
-  }, async () => ({ status: 'ok' }))
+  }, async () => {
+    await repository.health()
+    return { status: 'ok' }
+  })
 
   app.setNotFoundHandler((request, reply) => {
     reply.code(404).send({
@@ -112,6 +122,9 @@ export async function buildApp(options = {}) {
 
   app.decorate('supportRepository', repository)
   app.decorate('supportService', service)
+  app.addHook('onClose', async () => {
+    if (repository.disconnect) await repository.disconnect()
+  })
   await app.ready()
   return app
 }
