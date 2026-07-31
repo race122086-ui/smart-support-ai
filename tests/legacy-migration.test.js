@@ -49,3 +49,22 @@ test('marca una migración sin borrar las claves históricas', () => {
   assert.equal(storage.getItem(STORAGE_KEYS.reports), '[]')
   assert.equal(getLegacyMigration(storage), null)
 })
+
+
+test('permite recuperar las claves históricas si el destino quedó vacío', () => {
+  const storage = createStorage({
+    [STORAGE_KEYS.reports]: JSON.stringify([{
+      id: 'reporte-recuperable',
+      ticketNumber: 12,
+      userName: 'Persona de prueba',
+      description: 'Contenido que debe recuperarse',
+    }]),
+  })
+
+  markLegacyMigrationComplete('huella-anterior', storage)
+
+  const migration = getLegacyMigration(storage, { ignoreMarker: true })
+
+  assert.equal(migration.counts.reports, 1)
+  assert.equal(storage.getItem(STORAGE_KEYS.reports).includes('reporte-recuperable'), true)
+})

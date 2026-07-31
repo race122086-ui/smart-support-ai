@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @smartsupport/web",
+    "dev": "node scripts/dev.js",
+    "dev:web": "npm run dev --workspace @smartsupport/web",
     "dev:api": "npm run dev --workspace @smartsupport/api",
     "start": "npm run start --workspace @smartsupport/api",
     "start:api": "npm run start --workspace @smartsupport/api",

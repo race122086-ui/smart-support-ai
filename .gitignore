@@ -12,6 +12,7 @@ node_modules
 dist
 dist-ssr
 *.local
+.smartsupport/
 
 # Editor directories and files
 .vscode/*

@@ -28,7 +28,7 @@ export function loadConfig(environment = process.env) {
     port: parsePort(environment.PORT || environment.API_PORT),
     corsOrigin: parsedOrigin,
     logLevel,
-    databaseUrl: environment.DATABASE_URL ||
-      'postgresql://smartsupport:smartsupport@localhost:5432/smartsupport?schema=public',
+    databaseUrl: environment.DATABASE_URL || null,
+    dataFile: environment.API_DATA_FILE || '.smartsupport/data.json',
   }
 }
