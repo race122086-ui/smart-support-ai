@@ -12,11 +12,14 @@ function readJson(storage, key, fallback) {
   }
 }
 
-export function getLegacyMigration(storage = globalThis.localStorage) {
+export function getLegacyMigration(
+  storage = globalThis.localStorage,
+  { ignoreMarker = false } = {}
+) {
   const presentKeys = Object.values(STORAGE_KEYS).filter(
     (key) => storage.getItem(key) !== null
   )
-  if (!presentKeys.length || storage.getItem(migrationMarker)) return null
+  if (!presentKeys.length || (!ignoreMarker && storage.getItem(migrationMarker))) return null
   let backup
   try {
     backup = normalizeBackup({

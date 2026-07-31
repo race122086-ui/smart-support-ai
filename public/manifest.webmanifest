@@ -1,0 +1,20 @@
+{
+  "name": "SmartSupport",
+  "short_name": "SmartSupport",
+  "description": "Gestión de incidencias técnicas desde escritorio o móvil.",
+  "lang": "es-MX",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1117",
+  "theme_color": "#111522",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -8,7 +8,8 @@ test('carga valores predeterminados seguros para desarrollo local', () => {
     port: 3000,
     corsOrigin: 'http://localhost:5173',
     logLevel: 'info',
-    databaseUrl: 'postgresql://smartsupport:smartsupport@localhost:5432/smartsupport?schema=public',
+    databaseUrl: null,
+    dataFile: '.smartsupport/data.json',
   })
 })
 
@@ -31,6 +32,14 @@ test('prioriza PORT y escucha externamente en plataformas de despliegue', () => 
   assert.equal(config.port, 8080)
   assert.equal(config.host, '0.0.0.0')
   assert.equal(config.corsOrigin, 'https://app.example.com')
+  assert.equal(config.databaseUrl, 'postgresql://user:password@database.example.com:5432/smartsupport')
+})
+
+test('usa un archivo local solo cuando DATABASE_URL no existe', () => {
+  const config = loadConfig({ API_DATA_FILE: '/tmp/smartsupport-prueba.json' })
+
+  assert.equal(config.databaseUrl, null)
+  assert.equal(config.dataFile, '/tmp/smartsupport-prueba.json')
 })
 
 test('permite que API_HOST sobrescriba el host inferido', () => {

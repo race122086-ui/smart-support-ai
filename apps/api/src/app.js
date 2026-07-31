@@ -5,7 +5,7 @@ import Fastify from 'fastify'
 import { API_PREFIX } from '@smartsupport/contracts'
 import { loadConfig } from './config.js'
 import { DomainError } from './errors/domain-error.js'
-import { MemoryRepository } from './repositories/memory-repository.js'
+import { FileRepository } from './repositories/file-repository.js'
 import { PrismaRepository } from './repositories/prisma-repository.js'
 import { apiRoutes, sharedSchemas } from './routes/api-routes.js'
 import { SupportService } from './services/support-service.js'
@@ -32,7 +32,7 @@ export async function buildApp(options = {}) {
   const repository = options.repository || (
     config.databaseUrl
       ? new PrismaRepository(undefined, { datasourceUrl: config.databaseUrl })
-      : new MemoryRepository()
+      : new FileRepository(config.dataFile)
   )
   const service = options.service || new SupportService(repository, options.serviceOptions)
 

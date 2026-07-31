@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client.js'
 import { queryKeys, useApiMutation, useApiQuery } from '../../api/queries.js'
 import { ErrorState, LoadingState, useToast } from '../ui/Feedback.jsx'
+import { PwaInstall } from '../ui/PwaInstall.jsx'
 import { formatDate } from '../../utils/format.js'
 
 const navigation = [
@@ -104,6 +105,7 @@ export function AppShell() {
             <button type="submit">Buscar</button>
           </form>
           <div className="topbar-actions">
+            <PwaInstall />
             <button type="button" className="header-icon-button" aria-label={`Abrir notificaciones, ${unread} sin leer`} onClick={() => setShowNotifications(true)}>
               🔔<span>{unread}</span>
             </button>
