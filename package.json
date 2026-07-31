@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "npm run dev --workspace @smartsupport/web",
     "dev:api": "npm run dev --workspace @smartsupport/api",
+    "start": "npm run start --workspace @smartsupport/api",
+    "start:api": "npm run start --workspace @smartsupport/api",
     "build": "npm run build --workspaces --if-present",
     "build:web": "npm run build --workspace @smartsupport/web",
     "build:api": "npm run build --workspace @smartsupport/api",

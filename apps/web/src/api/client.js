@@ -1,4 +1,6 @@
-const apiBaseUrl = `${(import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '')}/api/v1`
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
+const apiOrigin = configuredApiUrl || (import.meta.env.DEV ? 'http://localhost:3000' : window.location.origin)
+const apiBaseUrl = `${apiOrigin.replace(/\/$/, '')}/api/v1`
 
 export class ApiError extends Error {
   constructor(message, status, code) {

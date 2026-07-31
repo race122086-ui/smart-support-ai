@@ -3,7 +3,7 @@ const allowedLogLevels = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 's
 function parsePort(value) {
   const port = Number(value || 3000)
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new TypeError('API_PORT debe ser un entero entre 1 y 65535')
+    throw new TypeError('PORT o API_PORT debe ser un entero entre 1 y 65535')
   }
   return port
 }
@@ -24,8 +24,8 @@ export function loadConfig(environment = process.env) {
     throw new TypeError('API_CORS_ORIGIN debe usar HTTP o HTTPS')
   }
   return {
-    host: environment.API_HOST || '127.0.0.1',
-    port: parsePort(environment.API_PORT),
+    host: environment.API_HOST || (environment.PORT ? '0.0.0.0' : '127.0.0.1'),
+    port: parsePort(environment.PORT || environment.API_PORT),
     corsOrigin: parsedOrigin,
     logLevel,
     databaseUrl: environment.DATABASE_URL ||
