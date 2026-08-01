@@ -187,7 +187,13 @@ test('aplica permisos ADMIN, TECHNICIAN y USER y aísla tickets entre usuarios',
     url: '/api/v1/reports',
   }))
   assert.equal(techList.statusCode, 200)
-  assert.ok(techList.json().items.some((item) => item.id === 'historico'))
+  assert.ok(techList.json().items.every((item) => item.id !== 'historico'))
+
+  const hiddenUnassigned = await app.inject(authenticated(technician, {
+    method: 'GET',
+    url: '/api/v1/reports/historico',
+  }))
+  assert.equal(hiddenUnassigned.statusCode, 403)
 
   for (const session of [technician, userA]) {
     const listTechnicians = await app.inject(authenticated(session, {
@@ -235,6 +241,11 @@ test('aplica permisos ADMIN, TECHNICIAN y USER y aísla tickets entre usuarios',
     payload: { technician: 'tecnico' },
   }))
   assert.equal(selfAssigned.statusCode, 200)
+  const assignedList = await app.inject(authenticated(technician, {
+    method: 'GET',
+    url: '/api/v1/reports',
+  }))
+  assert.ok(assignedList.json().items.some((item) => item.id === 'historico'))
 
   const techSettings = await app.inject(authenticated(technician, {
     method: 'GET',
@@ -292,4 +303,104 @@ test('creación del primer administrador rechaza contraseña débil y duplicados
   const source = await readFile(new URL('../prisma/create-admin.js', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /SeguraPruebas/)
   assert.doesNotMatch(source, /password\s*[:=]\s*['"][^'"]+['"]/)
+})
+
+
+test('aísla notificaciones por destinatario y aplica eventos según rol y actor', async (t) => {
+  const { app, repository } = await createAuthApp()
+  t.after(() => app.close())
+  const adminSession = await login(app, 'admin')
+  const technicianSession = await login(app, 'tecnico')
+  const userA = await login(app, 'usuario-a')
+  const userB = await login(app, 'usuario-b')
+
+  const created = await app.inject(authenticated(userA, {
+    method: 'POST', url: '/api/v1/reports', payload: reportInput,
+  }))
+  const report = created.json()
+  assert.equal(created.statusCode, 201)
+  assert.equal((await repository.listNotifications('usuario-a')).length, 1)
+  assert.equal((await repository.listNotifications('admin')).length, 1)
+  assert.equal((await repository.listNotifications('tecnico')).length, 0)
+  assert.equal((await repository.listNotifications('usuario-b')).length, 0)
+
+  await app.inject(authenticated(adminSession, {
+    method: 'PUT', url: `/api/v1/reports/${report.id}/technician`,
+    payload: { technician: 'tecnico' },
+  }))
+  assert.equal((await repository.listNotifications('usuario-a')).length, 2)
+  assert.equal((await repository.listNotifications('tecnico')).length, 1)
+  assert.equal((await repository.listNotifications('admin')).length, 1)
+
+  await app.inject(authenticated(technicianSession, {
+    method: 'PUT', url: `/api/v1/reports/${report.id}/status`,
+    payload: { status: 'En progreso' },
+  }))
+  assert.equal((await repository.listNotifications('usuario-a')).length, 3)
+  assert.equal((await repository.listNotifications('tecnico')).length, 1)
+  assert.equal((await repository.listNotifications('admin')).length, 2)
+
+  await app.inject(authenticated(userA, {
+    method: 'POST', url: `/api/v1/reports/${report.id}/comments`,
+    payload: { message: 'Sigue ocurriendo' },
+  }))
+  assert.equal((await repository.listNotifications('usuario-a')).length, 3)
+  assert.equal((await repository.listNotifications('tecnico')).length, 2)
+  assert.equal((await repository.listNotifications('admin')).length, 3)
+
+  await app.inject(authenticated(technicianSession, {
+    method: 'POST', url: `/api/v1/reports/${report.id}/comments`,
+    payload: { message: 'Problema resuelto' },
+  }))
+  assert.equal((await repository.listNotifications('usuario-a')).length, 4)
+  assert.equal((await repository.listNotifications('tecnico')).length, 2)
+  assert.equal((await repository.listNotifications('admin')).length, 4)
+  const adminActivity = await app.inject(authenticated(adminSession, {
+    method: 'GET', url: `/api/v1/reports/${report.id}/activity`,
+  }))
+  assert.ok(adminActivity.json().some((item) => item.message === 'Comentario: Problema resuelto'))
+
+  const userANotification = (await repository.listNotifications('usuario-a'))[0]
+  const forbiddenRead = await app.inject(authenticated(userB, {
+    method: 'POST', url: `/api/v1/notifications/${userANotification.id}/read`,
+  }))
+  assert.equal(forbiddenRead.statusCode, 404)
+
+  const ownList = await app.inject(authenticated(userA, {
+    method: 'GET', url: '/api/v1/notifications',
+  }))
+  assert.equal(ownList.statusCode, 200)
+  assert.ok(ownList.json().every((item) => item.reportId === report.id))
+  assert.ok(ownList.json().every((item) => !('recipientId' in item)))
+
+  const readOne = await app.inject(authenticated(userA, {
+    method: 'POST', url: `/api/v1/notifications/${userANotification.id}/read`,
+  }))
+  assert.equal(readOne.statusCode, 200)
+  assert.equal(readOne.json().read, true)
+
+  const readAll = await app.inject(authenticated(userA, {
+    method: 'POST', url: '/api/v1/notifications/read-all',
+  }))
+  assert.ok(readAll.json().every((item) => item.read))
+
+  await repository.saveNotification({
+    id: 'legacy-notification', recipientId: null, reportId: null,
+    message: 'Aviso heredado', type: 'info', read: false,
+    createdAt: '2026-07-01T00:00:00.000Z',
+  })
+  const afterLegacy = await app.inject(authenticated(adminSession, {
+    method: 'GET', url: '/api/v1/notifications',
+  }))
+  assert.ok(afterLegacy.json().every((item) => item.id !== 'legacy-notification'))
+})
+
+test('rechaza el flujo SSE sin una sesión válida', async (t) => {
+  const { app } = await createAuthApp()
+  t.after(() => app.close())
+  const response = await app.inject({
+    method: 'GET', url: '/api/v1/notifications/stream',
+    headers: { accept: 'text/event-stream' },
+  })
+  assert.equal(response.statusCode, 401)
 })

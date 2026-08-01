@@ -10,13 +10,23 @@ function clone(value) {
   return structuredClone(value)
 }
 
+function normalizeNotification(notification) {
+  return {
+    ...notification,
+    recipientId: notification.recipientId || null,
+    reportId: notification.reportId || null,
+    type: notification.type || 'info',
+    read: notification.read === true,
+  }
+}
+
 export class MemoryRepository {
   constructor(initialState = {}) {
     this.state = {
       reports: clone(initialState.reports || []),
       settings: clone(initialState.settings || DEFAULT_SETTINGS),
       technicians: clone(initialState.technicians || defaultTechnicians),
-      notifications: clone(initialState.notifications || []),
+      notifications: clone(initialState.notifications || []).map(normalizeNotification),
       users: clone(initialState.users || []),
       sessions: clone(initialState.sessions || []),
     }
@@ -55,6 +65,7 @@ export class MemoryRepository {
       ...clone(snapshot),
       users: clone(snapshot.users || this.state.users),
       sessions: clone(snapshot.sessions || this.state.sessions),
+      notifications: clone(snapshot.notifications || []).map(normalizeNotification),
     }
   }
 
@@ -107,13 +118,37 @@ export class MemoryRepository {
     return true
   }
 
-  async listNotifications() {
-    return clone(this.state.notifications)
+  async listNotifications(recipientId) {
+    return clone(this.state.notifications.filter((item) => item.recipientId === recipientId))
   }
 
   async saveNotification(notification) {
     this.state.notifications.unshift(clone(notification))
     return clone(notification)
+  }
+
+  async getNotification(id) {
+    return clone(this.state.notifications.find((item) => item.id === id) || null)
+  }
+
+  async markNotificationRead(id, recipientId, readAt) {
+    const notification = this.state.notifications.find(
+      (item) => item.id === id && item.recipientId === recipientId
+    )
+    if (!notification) return null
+    notification.read = true
+    notification.readAt = readAt
+    return clone(notification)
+  }
+
+  async markNotificationsRead(recipientId, readAt) {
+    for (const notification of this.state.notifications) {
+      if (notification.recipientId === recipientId) {
+        notification.read = true
+        notification.readAt = readAt
+      }
+    }
+    return this.listNotifications(recipientId)
   }
 
   async replaceNotifications(notifications) {

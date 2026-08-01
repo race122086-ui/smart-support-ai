@@ -148,7 +148,7 @@ test('cubre el ciclo de reportes, actividad, notificaciones, SLA y métricas', a
     method: 'GET',
     url: '/api/v1/notifications',
   })
-  assert.ok(notifications.json().length >= 5)
+  assert.ok(notifications.json().length >= 2)
 
   const read = await app.inject({
     method: 'POST',

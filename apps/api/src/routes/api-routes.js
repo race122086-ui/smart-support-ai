@@ -34,7 +34,7 @@ const errorResponses = {
 }
 
 export async function apiRoutes(app, options) {
-  const { service } = options
+  const { service, authService, notificationHub } = options
 
   app.get('/reports', {
     schema: {
@@ -199,7 +199,56 @@ export async function apiRoutes(app, options) {
         ...errorResponses,
       },
     },
-  }, async () => service.listNotifications())
+  }, async (request) => service.listNotifications(request.user))
+
+  app.post('/notifications/:id/read', {
+    schema: {
+      tags: ['Notificaciones'],
+      params: idParams,
+      response: { 200: { $ref: 'Notification#' }, ...errorResponses },
+    },
+  }, async (request) => service.markNotificationRead(request.params.id, request.user))
+
+  app.get('/notifications/stream', async (request, reply) => {
+    reply.hijack()
+    const response = reply.raw
+    response.writeHead(200, {
+      ...reply.getHeaders(),
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    response.write('retry: 5000\nevent: ready\ndata: {}\n\n')
+
+    const send = (notification) => {
+      const payload = {
+        id: notification.id,
+        reportId: notification.reportId,
+        message: notification.message,
+        type: notification.type,
+        createdAt: notification.createdAt,
+        read: notification.read,
+      }
+      const eventName = notification.type === 'ticket_deleted' ? 'ticket_deleted' : 'notification'
+      response.write(`id: ${notification.id}\nevent: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`)
+    }
+    const unsubscribe = notificationHub.subscribe(request.user.id, send)
+    const heartbeat = setInterval(async () => {
+      try {
+        await authService.authenticate(request.headers.cookie)
+        response.write(': heartbeat\n\n')
+      } catch {
+        cleanup()
+        response.end()
+      }
+    }, 25000)
+    const cleanup = () => {
+      clearInterval(heartbeat)
+      unsubscribe()
+    }
+    request.raw.on('close', cleanup)
+  })
 
   app.post('/notifications/read-all', {
     schema: {
@@ -209,7 +258,7 @@ export async function apiRoutes(app, options) {
         ...errorResponses,
       },
     },
-  }, async () => service.markNotificationsRead())
+  }, async (request) => service.markNotificationsRead(request.user))
 
   app.get('/backups/current', {
     schema: {

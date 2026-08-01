@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSession } from '../../app/session.jsx'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { api } from '../../api/client.js'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { api, notificationStreamUrl } from '../../api/client.js'
 import { queryKeys, useApiMutation, useApiQuery } from '../../api/queries.js'
+import { useQueryClient } from '@tanstack/react-query'
+import { mergeNotification } from '../../api/notification-utils.js'
+import { applyTicketDeleted, invalidateTicketEvent } from '../../api/ticket-sync.js'
 import { ErrorState, LoadingState, useToast } from '../ui/Feedback.jsx'
 import { PwaInstall } from '../ui/PwaInstall.jsx'
 import { formatDate } from '../../utils/format.js'
@@ -18,10 +21,61 @@ const navigation = [
   ['/settings', 'Configuración', ['ADMIN']],
 ]
 
+const notificationTypes = {
+  ticket_created: 'Nueva incidencia',
+  ticket_updated: 'Incidencia actualizada',
+  technician_assigned: 'Asignación',
+  status_changed: 'Cambio de estado',
+  comment_added: 'Comentario',
+  info: 'Información',
+}
+
+function useRealtimeNotifications() {
+  const client = useQueryClient()
+  const [connectionMode, setConnectionMode] = useState('connecting')
+
+  useEffect(() => {
+    const source = new EventSource(notificationStreamUrl, { withCredentials: true })
+    source.addEventListener('ready', () => {
+      setConnectionMode('realtime')
+      client.invalidateQueries({ queryKey: queryKeys.notifications })
+      client.invalidateQueries({ queryKey: ['reports'] })
+      client.invalidateQueries({ queryKey: ['report'] })
+      client.invalidateQueries({ queryKey: queryKeys.metrics })
+    })
+    source.addEventListener('notification', (event) => {
+      const notification = JSON.parse(event.data)
+      client.setQueryData(queryKeys.notifications, (current = []) =>
+        mergeNotification(current, notification)
+      )
+      invalidateTicketEvent(client, notification)
+    })
+    source.addEventListener('ticket_deleted', (event) => {
+      const deletion = JSON.parse(event.data)
+      applyTicketDeleted(client, deletion.reportId)
+    })
+    source.onerror = () => setConnectionMode('fallback')
+    return () => source.close()
+  }, [client])
+
+  useEffect(() => {
+    if (connectionMode !== 'fallback') return undefined
+    const polling = setInterval(() => {
+      client.invalidateQueries({ queryKey: ['reports'] })
+      client.invalidateQueries({ queryKey: ['report'] })
+      client.invalidateQueries({ queryKey: queryKeys.metrics })
+    }, 30000)
+    return () => clearInterval(polling)
+  }, [client, connectionMode])
+
+  return connectionMode
+}
+
 function NotificationsDialog({ onClose }) {
   const notify = useToast()
   const notifications = useApiQuery(queryKeys.notifications, api.listNotifications)
   const markRead = useApiMutation(api.markNotificationsRead, [queryKeys.notifications])
+  const markOne = useApiMutation(api.markNotificationRead, [queryKeys.notifications])
 
   async function handleMarkRead() {
     try {
@@ -45,9 +99,16 @@ function NotificationsDialog({ onClose }) {
           {notifications.data?.length === 0 && <p className="module-empty">No hay notificaciones.</p>}
           <ul className="module-list">
             {notifications.data?.map((item) => (
-              <li className="module-list__item" key={item.id}>
-                <span>{item.read ? '✓' : '●'} {item.message}</span>
-                <time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time>
+              <li className={`module-list__item notification-item${item.read ? '' : ' is-unread'}`} key={item.id}>
+                <div>
+                  <small>{notificationTypes[item.type] || item.type}</small>
+                  <span>{item.message}</span>
+                  {item.reportId && <Link to={`/tickets/${encodeURIComponent(item.reportId)}`} onClick={onClose}>Abrir ticket</Link>}
+                </div>
+                <div>
+                  <time dateTime={item.createdAt}>{formatDate(item.createdAt)}</time>
+                  {!item.read && <button type="button" className="btn btn--secondary" disabled={markOne.isPending} onClick={() => markOne.mutate(item.id)}>Marcar como leída</button>}
+                </div>
               </li>
             ))}
           </ul>
@@ -68,7 +129,10 @@ export function AppShell() {
   const visibleNavigation = navigation.filter(([, , roles]) => roles.includes(session.user.role))
   const [query, setQuery] = useState('')
   const [showNotifications, setShowNotifications] = useState(false)
-  const notifications = useApiQuery(queryKeys.notifications, api.listNotifications, { enabled: session.user.role === 'ADMIN' })
+  const connectionMode = useRealtimeNotifications()
+  const notifications = useApiQuery(queryKeys.notifications, api.listNotifications, {
+    refetchInterval: connectionMode === 'fallback' ? 30000 : false,
+  })
   const unread = notifications.data?.filter((item) => !item.read).length || 0
 
   function search(event) {
@@ -109,9 +173,10 @@ export function AppShell() {
           </form>
           <div className="topbar-actions">
             <PwaInstall />
-            {session.user.role === 'ADMIN' && <button type="button" className="header-icon-button" aria-label={`Abrir notificaciones, ${unread} sin leer`} onClick={() => setShowNotifications(true)}>
+            {connectionMode === 'fallback' && <small className="notification-connection">Actualización periódica</small>}
+            <button type="button" className="header-icon-button" aria-label={`Abrir notificaciones, ${unread} sin leer`} onClick={() => setShowNotifications(true)}>
               🔔<span>{unread}</span>
-            </button>}
+            </button>
             <div className="topbar-user">
               <span>{session.user.name[0]?.toUpperCase() || 'U'}</span>
               <div className="topbar-user__details"><strong>{session.user.name}</strong><small>{session.user.role}</small></div><button type="button" className="btn btn--secondary" onClick={() => session.logout()}>Salir</button>
@@ -120,7 +185,7 @@ export function AppShell() {
         </header>
         <main className="workspace-content"><Outlet /></main>
       </section>
-      {showNotifications && session.user.role === 'ADMIN' && <NotificationsDialog onClose={() => setShowNotifications(false)} />}
+      {showNotifications && <NotificationsDialog onClose={() => setShowNotifications(false)} />}
     </div>
   )
 }

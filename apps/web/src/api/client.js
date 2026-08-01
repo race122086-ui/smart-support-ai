@@ -1,7 +1,9 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
 const apiOrigin = configuredApiUrl || (import.meta.env.DEV ? 'http://localhost:3000' : window.location.origin)
 const apiBaseUrl = `${apiOrigin.replace(/\/$/, '')}/api/v1`
+export const notificationStreamUrl = `${apiBaseUrl}/notifications/stream`
 let csrfToken = null
+let csrfRefreshPromise = null
 
 export function setCsrfToken(value) {
   csrfToken = value || null
@@ -16,21 +18,40 @@ export class ApiError extends Error {
   }
 }
 
+async function refreshCsrfToken() {
+  if (!csrfRefreshPromise) {
+    csrfRefreshPromise = request('/auth/me', { csrfRecovery: false })
+      .then((session) => {
+        setCsrfToken(session.csrfToken)
+        return session.csrfToken
+      })
+      .finally(() => {
+        csrfRefreshPromise = null
+      })
+  }
+  return csrfRefreshPromise
+}
+
 export async function request(path, options = {}) {
-  const method = options.method || 'GET'
+  const { csrfRecovery = true, ...fetchOptions } = options
+  const method = fetchOptions.method || 'GET'
   const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...options,
+    ...fetchOptions,
     credentials: 'include',
     headers: {
       Accept: 'application/json',
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
       ...(!['GET', 'HEAD'].includes(method) && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-      ...options.headers,
+      ...fetchOptions.headers,
     },
   })
   if (response.status === 204) return null
   const body = await response.json().catch(() => null)
   if (!response.ok) {
+    if (response.status === 403 && body?.error?.code === 'CSRF_INVALID' && csrfRecovery) {
+      await refreshCsrfToken()
+      return request(path, { ...fetchOptions, csrfRecovery: false })
+    }
     if (response.status === 401 && !path.startsWith('/auth/login')) {
       window.dispatchEvent(new Event('smartsupport:session-expired'))
     }
@@ -77,6 +98,7 @@ export const api = {
   getSettings() { return request('/settings') },
   updateSettings(changes) { return request('/settings', jsonOptions('PATCH', changes)) },
   listNotifications() { return request('/notifications') },
+  markNotificationRead(id) { return request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }) },
   markNotificationsRead() { return request('/notifications/read-all', { method: 'POST' }) },
   exportBackup() { return request('/backups/current') },
   importBackup(backup) { return request('/backups/import', jsonOptions('POST', backup)) },

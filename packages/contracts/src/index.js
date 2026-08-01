@@ -48,6 +48,8 @@ export const activitySchema = {
   properties: {
     id: { type: 'string', minLength: 1 },
     message: { type: 'string' },
+    type: { type: 'string', minLength: 1 },
+    reportId: { type: ['string', 'null'] },
     createdAt: { type: 'string', format: 'date-time' },
   },
 }
@@ -103,10 +105,12 @@ export const notificationSchema = {
   $id: 'Notification',
   type: 'object',
   additionalProperties: false,
-  required: ['id', 'message', 'createdAt', 'read'],
+  required: ['id', 'message', 'type', 'reportId', 'createdAt', 'read'],
   properties: {
     id: { type: 'string', minLength: 1 },
     message: { type: 'string' },
+    type: { type: 'string', minLength: 1 },
+    reportId: { type: ['string', 'null'] },
     createdAt: { type: 'string', format: 'date-time' },
     read: { type: 'boolean' },
   },
@@ -153,4 +157,35 @@ export const editableReportProperties = {
   department: { type: 'string', enum: DEPARTMENTS },
   description: { type: 'string', minLength: 1, maxLength: 2000, pattern: '\\S' },
   priority: { type: 'string', enum: PRIORITIES },
+}
+
+
+function activitySequence(message = '') {
+  if (message === 'Reporte creado') return 0
+  if (message === 'Estado inicial: Pendiente') return 1
+  if (message.startsWith('Asignado a')) return 2
+  if (message === 'Estado cambiado a En progreso') return 3
+  if (message === 'Estado cambiado a Resuelto') return 4
+  if (message.startsWith('Comentario:')) return 5
+  if (message === 'Reporte cerrado') return 6
+  return 2
+}
+
+export function sortReportActivity(activity = []) {
+  const commentMessages = new Set()
+  const uniqueActivity = activity.filter((item) => {
+    if (!item.message?.startsWith('Comentario:')) return true
+    const normalized = item.message.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('es-MX')
+    if (commentMessages.has(normalized)) return false
+    commentMessages.add(normalized)
+    return true
+  })
+  return uniqueActivity.sort((left, right) => {
+    const leftClosed = left.message === 'Reporte cerrado'
+    const rightClosed = right.message === 'Reporte cerrado'
+    if (leftClosed !== rightClosed) return leftClosed ? 1 : -1
+    const dateDifference = new Date(left.createdAt) - new Date(right.createdAt)
+    if (dateDifference) return dateDifference
+    return activitySequence(left.message) - activitySequence(right.message)
+  })
 }

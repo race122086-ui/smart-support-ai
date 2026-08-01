@@ -5,6 +5,7 @@ import {
   ROLES,
   SORT_ORDERS,
   STATUSES,
+  sortReportActivity,
   UNASSIGNED_TECHNICIAN,
 } from '@smartsupport/contracts'
 import { createHash } from 'node:crypto'
@@ -54,6 +55,7 @@ export class SupportService {
     this.repository = repository
     this.idFactory = options.idFactory || (() => crypto.randomUUID())
     this.clock = options.clock || (() => new Date())
+    this.notificationHub = options.notificationHub || null
   }
 
   now() {
@@ -67,8 +69,7 @@ export class SupportService {
   canAccessReport(report, actor) {
     if (actor.role === 'ADMIN') return true
     if (actor.role === 'USER') return report.createdById === actor.id
-    return report.technician === UNASSIGNED_TECHNICIAN
-      || report.technicianId === actor.technicianId
+    return report.technicianId === actor.technicianId
       || report.technician === actor.name
   }
 
@@ -80,13 +81,47 @@ export class SupportService {
     return { id: this.idFactory(), message, createdAt: now }
   }
 
-  async notify(message, now = this.now(), repository = this.repository) {
-    return repository.saveNotification({
-      id: this.idFactory(),
-      message,
-      createdAt: now,
-      read: false,
-    })
+  async notificationRecipients(report, options = {}, repository = this.repository) {
+    const recipients = new Set()
+    if (options.creator && report.createdById) recipients.add(report.createdById)
+    if (options.technician && (report.technicianId || report.technician !== UNASSIGNED_TECHNICIAN)) {
+      const technician = (await repository.listTechnicians())
+        .find((item) => item.id === report.technicianId || item.name === report.technician)
+      if (technician?.userId) recipients.add(technician.userId)
+    }
+    if (options.admins) {
+      for (const user of await repository.listUsers()) {
+        if (user.active && user.role === 'ADMIN') recipients.add(user.id)
+      }
+    }
+    if (options.excludeActorId) recipients.delete(options.excludeActorId)
+    return [...recipients]
+  }
+
+  async notifyRecipients(repository, recipientIds, data, now = this.now()) {
+    const notifications = []
+    for (const recipientId of new Set(recipientIds)) {
+      notifications.push(await repository.saveNotification({
+        id: this.idFactory(),
+        recipientId,
+        reportId: data.reportId || null,
+        message: data.message,
+        type: data.type || 'info',
+        createdAt: now,
+        read: false,
+      }))
+    }
+    return notifications
+  }
+
+  publishNotifications(notifications) {
+    for (const notification of notifications) this.notificationHub?.publish(notification)
+  }
+
+  async finishNotificationTransaction(work) {
+    const result = await this.repository.transaction(work)
+    this.publishNotifications(result.notifications)
+    return result.value
   }
 
   async listReports(filters = {}, actor) {
@@ -137,7 +172,7 @@ export class SupportService {
     if (actor.role === 'USER') {
       input = { ...input, userName: actor.name, contactEmail: actor.email }
     }
-    return this.repository.transaction(async (repository) => {
+    return this.finishNotificationTransaction(async (repository) => {
       const ticketNumber = await repository.nextTicketNumber()
       const now = this.now()
       const report = {
@@ -153,21 +188,28 @@ export class SupportService {
         createdById: actor.id,
         technician: UNASSIGNED_TECHNICIAN,
         createdAt: now,
-        activity: [this.activity('Reporte creado', now)],
+        activity: [
+          this.activity('Reporte creado', now),
+          this.activity('Estado inicial: Pendiente', now),
+        ],
       }
       await repository.saveReport(report)
-      await this.notify(
-        `Se creó el reporte INC-${String(ticketNumber).padStart(4, '0')}`,
-        now,
-        repository
-      )
-      return report
+      const recipients = await this.notificationRecipients(report, {
+        creator: true,
+        admins: true,
+      }, repository)
+      const notifications = await this.notifyRecipients(repository, recipients, {
+        reportId: report.id,
+        type: 'ticket_created',
+        message: `Se creó el reporte INC-${String(ticketNumber).padStart(4, '0')}`,
+      }, now)
+      return { value: report, notifications }
     })
   }
 
   async updateReport(id, changes, actor) {
     if (!['ADMIN', 'USER'].includes(actor.role)) this.forbidden()
-    return this.repository.transaction(async (repository) => {
+    return this.finishNotificationTransaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
       this.assertReportAccess(report, actor)
@@ -181,17 +223,42 @@ export class SupportService {
       const now = this.now()
       report.activity.push(this.activity('Reporte actualizado', now))
       await repository.saveReport(report)
-      await this.notify(`Se actualizó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now, repository)
-      return report
+      const recipients = await this.notificationRecipients(report, { creator: true }, repository)
+      const notifications = await this.notifyRecipients(repository, recipients, {
+        reportId: report.id,
+        type: 'ticket_updated',
+        message: `Se actualizó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`,
+      }, now)
+      return { value: report, notifications }
     })
   }
 
   async deleteReport(id, actor) {
     if (actor.role !== 'ADMIN') this.forbidden()
-    return this.repository.transaction(async (repository) => {
-      if (!await repository.getReport(id)) throw notFound('Reporte')
+    const result = await this.repository.transaction(async (repository) => {
+      const report = await repository.getReport(id)
+      if (!report) throw notFound('Reporte')
+      const recipients = await this.notificationRecipients(report, {
+        creator: true,
+        technician: true,
+        admins: true,
+      }, repository)
       await repository.removeReport(id)
+      return {
+        recipients,
+        event: {
+          id: this.idFactory(),
+          reportId: report.id,
+          message: `El reporte INC-${String(report.ticketNumber).padStart(4, '0')} fue eliminado`,
+          type: 'ticket_deleted',
+          createdAt: this.now(),
+          read: true,
+        },
+      }
     })
+    for (const recipientId of result.recipients) {
+      this.notificationHub?.publish({ ...result.event, recipientId })
+    }
   }
 
   async changeStatus(id, status, actor) {
@@ -203,23 +270,37 @@ export class SupportService {
         409
       )
     }
-    return this.repository.transaction(async (repository) => {
+    return this.finishNotificationTransaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
       this.assertReportAccess(report, actor)
       if (actor.role === 'TECHNICIAN' && report.technician !== actor.name) this.forbidden()
       const now = this.now()
+      const previousStatus = report.status
       report.status = status
       report.activity.push(this.activity(`Estado cambiado a ${status}`, now))
+      if (status === 'Resuelto' && previousStatus !== 'Resuelto') {
+        report.activity.push(this.activity('Reporte cerrado', now))
+      }
       await repository.saveReport(report)
-      await this.notify(`El reporte INC-${String(report.ticketNumber).padStart(4, '0')} cambió a ${status}`, now, repository)
-      return report
+      const recipients = await this.notificationRecipients(report, {
+        creator: true,
+        technician: true,
+        admins: true,
+        excludeActorId: actor.id,
+      }, repository)
+      const notifications = await this.notifyRecipients(repository, recipients, {
+        reportId: report.id,
+        type: 'status_changed',
+        message: `El reporte INC-${String(report.ticketNumber).padStart(4, '0')} cambió a ${status}`,
+      }, now)
+      return { value: report, notifications }
     })
   }
 
   async assignTechnician(id, technicianName, actor) {
     if (!['ADMIN', 'TECHNICIAN'].includes(actor.role)) this.forbidden()
-    return this.repository.transaction(async (repository) => {
+    return this.finishNotificationTransaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
       if (actor.role === 'TECHNICIAN') {
@@ -241,18 +322,30 @@ export class SupportService {
       }
       const now = this.now()
       report.technician = technicianName
+      report.technicianId = technicianName === UNASSIGNED_TECHNICIAN
+        ? null
+        : (await repository.listTechnicians()).find((item) => item.name === technicianName)?.id || null
       const message = technicianName === UNASSIGNED_TECHNICIAN
         ? 'Asignación de técnico retirada'
         : `Asignado a ${technicianName}`
       report.activity.push(this.activity(message, now))
       await repository.saveReport(report)
-      await this.notify(`Se actualizó la asignación del reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now, repository)
-      return report
+      const recipients = await this.notificationRecipients(report, {
+        creator: true,
+        technician: true,
+        excludeActorId: actor.id,
+      }, repository)
+      const notifications = await this.notifyRecipients(repository, recipients, {
+        reportId: report.id,
+        type: 'technician_assigned',
+        message: `Se actualizó la asignación del reporte INC-${String(report.ticketNumber).padStart(4, '0')}`,
+      }, now)
+      return { value: report, notifications }
     })
   }
 
   async addComment(id, message, actor) {
-    return this.repository.transaction(async (repository) => {
+    return this.finishNotificationTransaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
       this.assertReportAccess(report, actor)
@@ -260,16 +353,24 @@ export class SupportService {
       const activity = this.activity(`Comentario: ${message.trim()}`, now)
       report.activity.push(activity)
       await repository.saveReport(report)
-      await this.notify(`Se comentó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`, now, repository)
-      return activity
+      const recipients = await this.notificationRecipients(report, {
+        creator: true,
+        technician: true,
+        admins: true,
+        excludeActorId: actor.id,
+      }, repository)
+      const notifications = await this.notifyRecipients(repository, recipients, {
+        reportId: report.id,
+        type: 'comment_added',
+        message: `Se comentó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`,
+      }, now)
+      return { value: activity, notifications }
     })
   }
 
   async getActivity(id, actor) {
     const report = await this.getReport(id, actor)
-    return [...report.activity].sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    )
+    return sortReportActivity(report.activity)
   }
 
   slaDeadline(report, sla) {
@@ -333,7 +434,6 @@ export class SupportService {
       }
       const technician = { id: this.idFactory(), name: normalizedName, active: true }
       await repository.saveTechnician(technician)
-      await this.notify(`Se agregó al técnico ${normalizedName}`, this.now(), repository)
       return technician
     })
   }
@@ -374,7 +474,6 @@ export class SupportService {
       if (changes.profile) settings.profile = { ...settings.profile, ...changes.profile }
       if (changes.sla) settings.sla = { ...settings.sla, ...changes.sla }
       await repository.saveSettings(settings)
-      await this.notify('Se actualizó la configuración', this.now(), repository)
       const technicians = await repository.listTechnicians()
       return {
         ...settings,
@@ -383,32 +482,33 @@ export class SupportService {
     })
   }
 
-  async listNotifications() {
-    return this.repository.listNotifications()
+  async listNotifications(actor) {
+    return this.repository.listNotifications(actor.id)
   }
 
-  async markNotificationsRead() {
-    const notifications = (await this.repository.listNotifications()).map(
-      (notification) => ({ ...notification, read: true })
-    )
-    return this.repository.replaceNotifications(notifications)
+  async markNotificationRead(id, actor) {
+    const notification = await this.repository.markNotificationRead(id, actor.id, this.now())
+    if (!notification) throw notFound('Notificación')
+    return notification
+  }
+
+  async markNotificationsRead(actor) {
+    return this.repository.markNotificationsRead(actor.id, this.now())
   }
 
   async exportBackup() {
-    return this.repository.transaction(async (repository) => {
-      const snapshot = await repository.snapshot()
-      return {
-        version: 2,
-        reports: snapshot.reports,
-        settings: {
-          ...snapshot.settings,
-          technicians: snapshot.technicians
-            .filter((technician) => technician.active)
-            .map((technician) => technician.name),
-        },
-        notifications: snapshot.notifications,
-      }
-    })
+    const snapshot = await this.repository.snapshot()
+    return {
+      version: 2,
+      reports: snapshot.reports,
+      settings: {
+        ...snapshot.settings,
+        technicians: snapshot.technicians
+          .filter((technician) => technician.active)
+          .map((technician) => technician.name),
+      },
+      notifications: snapshot.notifications,
+    }
   }
 
   normalizeImportedReport(source, index, now) {
@@ -501,7 +601,10 @@ export class SupportService {
     const notifications = Array.isArray(backup.notifications)
       ? backup.notifications.map((item, index) => ({
           id: safeUuid(item?.id, `notification:${index + 1}:${item?.message || ''}`),
+          recipientId: null,
+          reportId: null,
           message: normalizedText(item?.message),
+          type: normalizedText(item?.type) || 'info',
           createdAt: isoDate(item?.createdAt, now),
           read: item?.read === true,
         }))

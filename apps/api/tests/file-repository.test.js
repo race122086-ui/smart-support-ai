@@ -48,3 +48,24 @@ test('rechaza un archivo local alterado sin sobrescribirlo', async (t) => {
   await assert.rejects(repository.connect(), /estructura válida/)
   assert.equal(await readFile(filePath, 'utf8'), '{"reports":"dato inválido"}')
 })
+
+
+test('aísla notificaciones locales y conserva las heredadas sin destinatario', async (t) => {
+  const filePath = await temporaryFile(t)
+  const repository = new FileRepository(filePath)
+  await repository.saveNotification({
+    id: 'heredada', message: 'Aviso anterior', createdAt: '2026-07-01T00:00:00.000Z', read: false,
+  })
+  await repository.saveNotification({
+    id: 'propia', recipientId: 'usuario-a', reportId: 'reporte-1', type: 'status_changed',
+    message: 'Cambio de estado', createdAt: '2026-07-31T00:00:00.000Z', read: false,
+  })
+  await repository.disconnect()
+
+  const reopened = new FileRepository(filePath)
+  await reopened.connect()
+  assert.deepEqual((await reopened.listNotifications('usuario-a')).map((item) => item.id), ['propia'])
+  assert.equal((await reopened.listNotifications('usuario-b')).length, 0)
+  assert.equal((await reopened.markNotificationRead('propia', 'usuario-b', '2026-07-31T01:00:00.000Z')), null)
+  assert.equal((await reopened.markNotificationRead('propia', 'usuario-a', '2026-07-31T01:00:00.000Z')).read, true)
+})

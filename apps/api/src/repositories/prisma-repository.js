@@ -37,7 +37,10 @@ function mapReport(report) {
 function mapNotification(notification) {
   return {
     id: notification.id,
+    recipientId: notification.recipientId,
+    reportId: notification.reportId,
     message: notification.message,
+    type: notification.type,
     createdAt: notification.createdAt.toISOString(),
     read: notification.readAt !== null,
   }
@@ -127,7 +130,7 @@ export class PrismaRepository {
       this.listReports(),
       this.getSettings(),
       this.listTechnicians(),
-      this.listNotifications(),
+      this.listAllNotifications(),
     ])
     return { reports, settings, technicians, notifications }
   }
@@ -278,8 +281,16 @@ export class PrismaRepository {
     return result.count > 0
   }
 
-  async listNotifications() {
+  async listAllNotifications() {
     const notifications = await this.client.notification.findMany({
+      orderBy: { createdAt: 'desc' },
+    })
+    return notifications.map(mapNotification)
+  }
+
+  async listNotifications(recipientId) {
+    const notifications = await this.client.notification.findMany({
+      where: { recipientId },
       orderBy: { createdAt: 'desc' },
     })
     return notifications.map(mapNotification)
@@ -289,17 +300,44 @@ export class PrismaRepository {
     const saved = await this.client.notification.upsert({
       where: { id: notification.id },
       update: {
+        recipientId: notification.recipientId || null,
+        reportId: notification.reportId || null,
         message: notification.message,
+        type: notification.type || 'info',
         readAt: notification.read ? new Date(notification.createdAt) : null,
       },
       create: {
         id: notification.id,
+        recipientId: notification.recipientId || null,
+        reportId: notification.reportId || null,
         message: notification.message,
+        type: notification.type || 'info',
         createdAt: new Date(notification.createdAt),
         readAt: notification.read ? new Date(notification.createdAt) : null,
       },
     })
     return mapNotification(saved)
+  }
+
+  async getNotification(id) {
+    const notification = await this.client.notification.findUnique({ where: { id } })
+    return notification ? mapNotification(notification) : null
+  }
+
+  async markNotificationRead(id, recipientId, readAt) {
+    const result = await this.client.notification.updateMany({
+      where: { id, recipientId },
+      data: { readAt: new Date(readAt) },
+    })
+    return result.count ? this.getNotification(id) : null
+  }
+
+  async markNotificationsRead(recipientId, readAt) {
+    await this.client.notification.updateMany({
+      where: { recipientId, readAt: null },
+      data: { readAt: new Date(readAt) },
+    })
+    return this.listNotifications(recipientId)
   }
 
   async replaceNotifications(notifications) {
@@ -310,7 +348,7 @@ export class PrismaRepository {
         data: { readAt: new Date() },
       })
     }
-    return this.listNotifications()
+    return this.listAllNotifications()
   }
 
   async listUsers() {

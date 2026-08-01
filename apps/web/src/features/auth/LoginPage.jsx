@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { useSession } from '../../app/session.jsx'
+import { LoadingState } from '../../components/ui/Feedback.jsx'
 
 export function LoginPage() {
   const session = useSession()
@@ -9,7 +10,8 @@ export function LoginPage() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  if (session.user) return <Navigate to={location.state?.from || '/'} replace />
+  if (session.status === 'loading') return <main className="connection-state"><LoadingState message="Comprobando sesión…" /></main>
+  if (session.status === 'authenticated' && session.user) return <Navigate to={location.state?.from || '/'} replace />
 
   async function submit(event) {
     event.preventDefault()

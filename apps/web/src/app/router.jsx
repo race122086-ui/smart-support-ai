@@ -14,17 +14,25 @@ import { SettingsPage } from '../features/settings/SettingsPage.jsx'
 import { TechniciansPage } from '../features/technicians/TechniciansPage.jsx'
 import { UsersPage } from '../features/users/UsersPage.jsx'
 
-function ProtectedApp() {
+function SessionLoading() {
+  return <main className="connection-state"><LoadingState message="Comprobando sesión…" /></main>
+}
+
+export function ProtectedApp() {
   const session = useSession()
   const location = useLocation()
-  if (session.loading) return <main className="connection-state"><LoadingState message="Comprobando sesión…" /></main>
-  if (!session.user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (session.status === 'loading') return <SessionLoading />
+  if (session.status !== 'authenticated' || !session.user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
   return <AppShell />
 }
 
-function RolePage({ roles, children }) {
-  const { user } = useSession()
-  return roles.includes(user?.role) ? children : <Navigate to="/" replace />
+export function RolePage({ roles, children }) {
+  const session = useSession()
+  if (session.status === 'loading') return <SessionLoading />
+  if (session.status !== 'authenticated' || !session.user) {
+    return <Navigate to="/login" replace />
+  }
+  return roles.includes(session.user.role) ? children : <Navigate to="/" replace />
 }
 
 function NotFoundPage() {

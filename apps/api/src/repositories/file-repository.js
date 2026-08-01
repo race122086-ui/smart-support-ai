@@ -124,6 +124,18 @@ export class FileRepository extends MemoryRepository {
     return result
   }
 
+  async markNotificationRead(id, recipientId, readAt) {
+    const result = await super.markNotificationRead(id, recipientId, readAt)
+    await this.persistOutsideTransaction()
+    return result
+  }
+
+  async markNotificationsRead(recipientId, readAt) {
+    const result = await super.markNotificationsRead(recipientId, readAt)
+    await this.persistOutsideTransaction()
+    return result
+  }
+
   async replaceNotifications(notifications) {
     const result = await super.replaceNotifications(notifications)
     await this.persistOutsideTransaction()

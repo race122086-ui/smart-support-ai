@@ -317,3 +317,16 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+.notification-connection { color: var(--text); white-space: nowrap; }
+.notification-item { align-items: flex-start; gap: 1rem; }
+.notification-item.is-unread { border-left: 3px solid var(--accent); }
+.notification-item > div { display: grid; gap: .35rem; }
+.notification-item > div:last-child { justify-items: end; }
+.notification-item small { color: var(--accent); font-weight: 700; }
+.notification-item .btn { padding: .4rem .65rem; }
+@media (max-width: 720px) {
+  .notification-connection { display: none; }
+  .notification-item { align-items: stretch; }
+  .notification-item > div:last-child { justify-items: start; }
+}

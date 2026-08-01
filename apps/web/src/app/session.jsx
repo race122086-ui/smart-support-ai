@@ -2,24 +2,34 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { api, setCsrfToken } from '../api/client.js'
 
 const SessionContext = createContext(null)
+let sessionRestorePromise = null
+
+function restoreSession() {
+  if (!sessionRestorePromise) {
+    sessionRestorePromise = api.me().finally(() => {
+      sessionRestorePromise = null
+    })
+  }
+  return sessionRestorePromise
+}
 
 export function SessionProvider({ children }) {
-  const [session, setSession] = useState({ loading: true, user: null })
+  const [session, setSession] = useState({ status: 'loading', user: null })
 
   useEffect(() => {
     let active = true
-    api.me()
+    restoreSession()
       .then((data) => {
         if (!active) return
         setCsrfToken(data.csrfToken)
-        setSession({ loading: false, user: data.user })
+        setSession({ status: 'authenticated', user: data.user })
       })
       .catch(() => {
-        if (active) setSession({ loading: false, user: null })
+        if (active) setSession({ status: 'anonymous', user: null })
       })
     function expired() {
       setCsrfToken(null)
-      setSession({ loading: false, user: null })
+      setSession({ status: 'anonymous', user: null })
     }
     window.addEventListener('smartsupport:session-expired', expired)
     return () => {
@@ -33,14 +43,14 @@ export function SessionProvider({ children }) {
     async login(credentials) {
       const data = await api.login(credentials)
       setCsrfToken(data.csrfToken)
-      setSession({ loading: false, user: data.user })
+      setSession({ status: 'authenticated', user: data.user })
     },
     async logout() {
       try {
         await api.logout()
       } finally {
         setCsrfToken(null)
-        setSession({ loading: false, user: null })
+        setSession({ status: 'anonymous', user: null })
       }
     },
   }), [session])

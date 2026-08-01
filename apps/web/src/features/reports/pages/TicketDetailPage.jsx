@@ -1,6 +1,6 @@
-import { STATUSES, UNASSIGNED_TECHNICIAN } from '@smartsupport/contracts'
+import { STATUSES, UNASSIGNED_TECHNICIAN, sortReportActivity } from '@smartsupport/contracts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../api/client.js'
 import { useSession } from '../../../app/session.jsx'
@@ -21,6 +21,22 @@ export function TicketDetailPage() {
   const activity = useApiQuery(queryKeys.activity(id), () => api.getActivity(id))
   const sla = useApiQuery(queryKeys.sla(id), () => api.getSla(id))
 
+  useEffect(() => {
+    if (!report.isError || report.error?.status !== 404) return
+    notify('Este ticket fue eliminado', 'error')
+    navigate('/tickets', { replace: true })
+  }, [navigate, notify, report.error, report.isError])
+
+  useEffect(() => {
+    function ticketDeleted(event) {
+      if (event.detail?.reportId !== id) return
+      notify('Este ticket fue eliminado', 'error')
+      navigate('/tickets', { replace: true })
+    }
+    window.addEventListener('smartsupport:ticket-deleted', ticketDeleted)
+    return () => window.removeEventListener('smartsupport:ticket-deleted', ticketDeleted)
+  }, [id, navigate, notify])
+
   const mutation = useMutation({
     mutationFn: ({ action, value }) => {
       if (action === 'status') return api.changeStatus(id, value)
@@ -35,7 +51,7 @@ export function TicketDetailPage() {
         navigate('/tickets')
       } else {
         notify(variables.action === 'comment' ? 'Comentario agregado al historial' : 'Ticket actualizado')
-        setComment('')
+        if (variables.action === 'comment') setComment('')
       }
     },
   })
@@ -72,7 +88,7 @@ export function TicketDetailPage() {
         </div>}
         <section className="activity" aria-labelledby="activity-title">
           <h3 id="activity-title">Historial de actividad</h3>
-          <ul className="activity-list">{[...activities].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((entry) => <li className="activity-item" key={entry.id}><span>{entry.message}</span><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time></li>)}</ul>
+          <ul className="activity-list">{sortReportActivity(activities).map((entry) => <li className="activity-item" key={entry.id}><span>{entry.message}</span><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time></li>)}</ul>
           <form className="comment-box" onSubmit={(event) => { event.preventDefault(); if (comment.trim()) mutation.mutate({ action: 'comment', value: comment.trim() }) }}>
             <label className="sr-only" htmlFor="comment">Agregar comentario</label><input id="comment" className="comment-input" value={comment} maxLength="160" onChange={(event) => setComment(event.target.value)} placeholder="Agregar comentario…" /><button className="btn btn--comment" type="submit" disabled={!comment.trim() || mutation.isPending}>Agregar</button>
           </form>

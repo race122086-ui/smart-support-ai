@@ -22,6 +22,7 @@ model User {
   active       Boolean      @default(true)
   technician   Technician?
   reports      Report[]
+  notifications Notification[]
   sessions     Session[]
   createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -59,6 +60,7 @@ model Report {
   createdById  String?          @map("created_by_id") @db.Uuid
   createdBy    User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
   activities   ReportActivity[]
+  notifications Notification[]
   createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -99,13 +101,17 @@ model Technician {
 
 model Notification {
   id          String    @id @default(uuid()) @db.Uuid
-  recipientId String?   @map("recipient_id")
+  recipientId String?   @map("recipient_id") @db.Uuid
+  recipient   User?     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  reportId    String?   @map("report_id") @db.Uuid
+  report      Report?   @relation(fields: [reportId], references: [id], onDelete: SetNull)
   message     String
   type        String    @default("info")
   readAt      DateTime? @map("read_at") @db.Timestamptz(3)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  @@index([createdAt])
+  @@index([recipientId, createdAt])
+  @@index([reportId])
   @@map("notifications")
 }
 

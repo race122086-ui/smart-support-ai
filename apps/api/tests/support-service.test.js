@@ -32,7 +32,7 @@ test('crea folio, actividad y notificación en el servicio', async () => {
   assert.equal(report.status, 'Pendiente')
   assert.equal(report.technician, 'Sin asignar')
   assert.equal(report.activity[0].message, 'Reporte creado')
-  assert.equal((await repository.listNotifications()).length, 1)
+  assert.equal((await repository.listNotifications(admin.id)).length, 1)
 })
 
 test('calcula SLA en el límite exacto y después del límite', async () => {
@@ -92,4 +92,58 @@ test('filtra, ordena y pagina sin exponer el arreglo del repositorio', async () 
 
   result.items[0].userName = 'Mutado'
   assert.equal((await repository.listReports())[0].userName, 'María López')
+})
+
+
+test('elimina como ADMIN y publica ticket_deleted a creador y técnico autorizados', async () => {
+  const events = []
+  const repository = new MemoryRepository({
+    users: [
+      { id: 'admin-test', name: 'Admin', role: 'ADMIN', active: true },
+      { id: 'usuario-creador', name: 'Usuario', role: 'USER', active: true },
+      { id: 'tecnico-user', name: 'Técnico', role: 'TECHNICIAN', active: true },
+    ],
+    technicians: [{
+      id: 'tecnico-id', name: 'Técnico', userId: 'tecnico-user', active: true,
+    }],
+    reports: [{
+      id: 'reporte-eliminado', ticketNumber: 42, ...validReport,
+      status: 'Pendiente', technician: 'Técnico', technicianId: 'tecnico-id',
+      createdById: 'usuario-creador', createdAt: '2026-07-29T12:00:00.000Z', activity: [],
+    }],
+  })
+  const service = new SupportService(repository, {
+    clock: () => new Date('2026-07-29T12:00:00.000Z'),
+    idFactory: () => 'evento-eliminacion',
+    notificationHub: { publish: (event) => events.push(event) },
+  })
+
+  await service.deleteReport('reporte-eliminado', admin)
+
+  assert.equal(await repository.getReport('reporte-eliminado'), null)
+  assert.deepEqual(new Set(events.map((event) => event.recipientId)),
+    new Set(['admin-test', 'usuario-creador', 'tecnico-user']))
+  assert.ok(events.every((event) => event.type === 'ticket_deleted'))
+  assert.ok(events.every((event) => event.reportId === 'reporte-eliminado'))
+})
+
+
+test('registra el cierre una sola vez cuando el reporte cambia a Resuelto', async () => {
+  const { repository, service } = createService({
+    reports: [{
+      id: 'reporte-cierre', ticketNumber: 9, ...validReport, status: 'En progreso',
+      technician: 'Admin', createdById: 'admin-test',
+      createdAt: '2026-07-29T10:00:00.000Z', activity: [],
+    }],
+    users: [admin],
+  })
+
+  await service.changeStatus('reporte-cierre', 'Resuelto', admin)
+  let report = await repository.getReport('reporte-cierre')
+  assert.ok(report.activity.some((item) => item.message === 'Estado cambiado a Resuelto'))
+  assert.equal(report.activity.filter((item) => item.message === 'Reporte cerrado').length, 1)
+
+  await service.changeStatus('reporte-cierre', 'Resuelto', admin)
+  report = await repository.getReport('reporte-cierre')
+  assert.equal(report.activity.filter((item) => item.message === 'Reporte cerrado').length, 1)
 })

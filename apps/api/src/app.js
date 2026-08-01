@@ -7,6 +7,7 @@ import { AuthService } from './auth/auth-service.js'
 import { loadConfig } from './config.js'
 import { DomainError } from './errors/domain-error.js'
 import { FileRepository } from './repositories/file-repository.js'
+import { NotificationHub } from './realtime/notification-hub.js'
 import { PrismaRepository } from './repositories/prisma-repository.js'
 import { apiRoutes, sharedSchemas } from './routes/api-routes.js'
 import { authRoutes } from './routes/auth-routes.js'
@@ -32,7 +33,11 @@ export async function buildApp(options = {}) {
       ? new PrismaRepository(undefined, { datasourceUrl: config.databaseUrl })
       : new FileRepository(config.dataFile)
   )
-  const service = options.service || new SupportService(repository, options.serviceOptions)
+  const notificationHub = options.notificationHub || new NotificationHub()
+  const service = options.service || new SupportService(repository, {
+    ...options.serviceOptions,
+    notificationHub,
+  })
   const authService = options.authService || new AuthService(repository, options.authOptions)
 
   if (repository.connect) await repository.connect()
@@ -124,7 +129,6 @@ export async function buildApp(options = {}) {
     `${API_PREFIX}/backups`,
     `${API_PREFIX}/settings`,
     `${API_PREFIX}/technicians`,
-    `${API_PREFIX}/notifications`,
     `${API_PREFIX}/metrics`,
   ]
   app.addHook('preHandler', async (request) => {
@@ -147,12 +151,18 @@ export async function buildApp(options = {}) {
     authService,
     secureCookies: config.production === true,
   })
-  await app.register(apiRoutes, { prefix: API_PREFIX, service })
+  await app.register(apiRoutes, {
+    prefix: API_PREFIX,
+    service,
+    authService,
+    notificationHub,
+  })
 
   app.decorate('supportRepository', repository)
   app.decorate('supportService', service)
   app.decorate('authService', authService)
   app.addHook('onClose', async () => {
+    notificationHub.clear()
     if (repository.disconnect) await repository.disconnect()
   })
   await app.ready()
