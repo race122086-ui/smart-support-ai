@@ -16,6 +16,8 @@ function validateStoredData(value) {
   ) {
     throw new TypeError('El archivo local de SmartSupport no tiene una estructura válida')
   }
+  value.users = Array.isArray(value.users) ? value.users : []
+  value.sessions = Array.isArray(value.sessions) ? value.sessions : []
   if (value.imports !== undefined && !Array.isArray(value.imports)) {
     throw new TypeError('El historial de importaciones local no es válido')
   }
@@ -126,6 +128,38 @@ export class FileRepository extends MemoryRepository {
     const result = await super.replaceNotifications(notifications)
     await this.persistOutsideTransaction()
     return result
+  }
+
+  async saveUser(user) {
+    const result = await super.saveUser(user)
+    await this.persistOutsideTransaction()
+    return result
+  }
+
+  async saveSession(session) {
+    const result = await super.saveSession(session)
+    await this.persistOutsideTransaction()
+    return result
+  }
+
+  async updateSessionCsrf(tokenHash, csrfHash) {
+    await super.updateSessionCsrf(tokenHash, csrfHash)
+    await this.persistOutsideTransaction()
+  }
+
+  async removeSessionByTokenHash(tokenHash) {
+    await super.removeSessionByTokenHash(tokenHash)
+    await this.persistOutsideTransaction()
+  }
+
+  async removeUserSessions(userId) {
+    await super.removeUserSessions(userId)
+    await this.persistOutsideTransaction()
+  }
+
+  async removeExpiredSessions(now) {
+    await super.removeExpiredSessions(now)
+    await this.persistOutsideTransaction()
   }
 
   async saveImport(fingerprint, result) {

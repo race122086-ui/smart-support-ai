@@ -81,6 +81,7 @@ export const reportSchema = {
     priority: { type: 'string', enum: PRIORITIES },
     status: { type: 'string', enum: STATUSES },
     technician: { type: 'string', minLength: 1 },
+    createdById: { type: ['string', 'null'] },
     createdAt: { type: 'string', format: 'date-time' },
     activity: { type: 'array', items: { $ref: 'Activity#' } },
   },

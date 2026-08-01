@@ -17,6 +17,8 @@ export class MemoryRepository {
       settings: clone(initialState.settings || DEFAULT_SETTINGS),
       technicians: clone(initialState.technicians || defaultTechnicians),
       notifications: clone(initialState.notifications || []),
+      users: clone(initialState.users || []),
+      sessions: clone(initialState.sessions || []),
     }
     this.imports = new Map()
   }
@@ -49,7 +51,11 @@ export class MemoryRepository {
   }
 
   async replace(snapshot) {
-    this.state = clone(snapshot)
+    this.state = {
+      ...clone(snapshot),
+      users: clone(snapshot.users || this.state.users),
+      sessions: clone(snapshot.sessions || this.state.sessions),
+    }
   }
 
   async listReports() {
@@ -113,6 +119,54 @@ export class MemoryRepository {
   async replaceNotifications(notifications) {
     this.state.notifications = clone(notifications)
     return clone(notifications)
+  }
+
+  async listUsers() {
+    return clone(this.state.users)
+  }
+
+  async getUser(id) {
+    return clone(this.state.users.find((user) => user.id === id) || null)
+  }
+
+  async getUserByEmail(email) {
+    return clone(this.state.users.find((user) => user.email === email) || null)
+  }
+
+  async saveUser(user) {
+    const index = this.state.users.findIndex((item) => item.id === user.id)
+    if (index === -1) this.state.users.push(clone(user))
+    else this.state.users[index] = clone(user)
+    return clone(user)
+  }
+
+  async saveSession(session) {
+    this.state.sessions.push(clone(session))
+    return clone(session)
+  }
+
+  async getSessionByTokenHash(tokenHash) {
+    const session = this.state.sessions.find((item) => item.tokenHash === tokenHash)
+    if (!session) return null
+    const user = this.state.users.find((item) => item.id === session.userId)
+    return user ? clone({ ...session, user }) : null
+  }
+
+  async updateSessionCsrf(tokenHash, csrfHash) {
+    const session = this.state.sessions.find((item) => item.tokenHash === tokenHash)
+    if (session) session.csrfHash = csrfHash
+  }
+
+  async removeSessionByTokenHash(tokenHash) {
+    this.state.sessions = this.state.sessions.filter((item) => item.tokenHash !== tokenHash)
+  }
+
+  async removeUserSessions(userId) {
+    this.state.sessions = this.state.sessions.filter((item) => item.userId !== userId)
+  }
+
+  async removeExpiredSessions(now) {
+    this.state.sessions = this.state.sessions.filter((item) => new Date(item.expiresAt) > now)
   }
 
   async getImport(fingerprint) {

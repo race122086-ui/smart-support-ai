@@ -25,6 +25,8 @@ import {
 } from '../schemas/api-schemas.js'
 
 const errorResponses = {
+  401: { $ref: 'Error#' },
+  403: { $ref: 'Error#' },
   400: { $ref: 'Error#' },
   404: { $ref: 'Error#' },
   409: { $ref: 'Error#' },
@@ -40,7 +42,7 @@ export async function apiRoutes(app, options) {
       querystring: reportQuery,
       response: { 200: reportListResponse, ...errorResponses },
     },
-  }, async (request) => service.listReports(request.query))
+  }, async (request) => service.listReports(request.query, request.user))
 
   app.post('/reports', {
     schema: {
@@ -49,7 +51,7 @@ export async function apiRoutes(app, options) {
       response: { 201: { $ref: 'Report#' }, ...errorResponses },
     },
   }, async (request, reply) => {
-    const report = await service.createReport(request.body)
+    const report = await service.createReport(request.body, request.user)
     return reply
       .code(201)
       .header('Location', `/api/v1/reports/${report.id}`)
@@ -62,7 +64,7 @@ export async function apiRoutes(app, options) {
       params: idParams,
       response: { 200: { $ref: 'Report#' }, ...errorResponses },
     },
-  }, async (request) => service.getReport(request.params.id))
+  }, async (request) => service.getReport(request.params.id, request.user))
 
   app.patch('/reports/:id', {
     schema: {
@@ -71,7 +73,7 @@ export async function apiRoutes(app, options) {
       body: reportUpdateBody,
       response: { 200: { $ref: 'Report#' }, ...errorResponses },
     },
-  }, async (request) => service.updateReport(request.params.id, request.body))
+  }, async (request) => service.updateReport(request.params.id, request.body, request.user))
 
   app.delete('/reports/:id', {
     schema: {
@@ -80,7 +82,7 @@ export async function apiRoutes(app, options) {
       response: { ...errorResponses },
     },
   }, async (request, reply) => {
-    await service.deleteReport(request.params.id)
+    await service.deleteReport(request.params.id, request.user)
     return reply.code(204).send()
   })
 
@@ -91,7 +93,7 @@ export async function apiRoutes(app, options) {
       body: statusBody,
       response: { 200: { $ref: 'Report#' }, ...errorResponses },
     },
-  }, async (request) => service.changeStatus(request.params.id, request.body.status))
+  }, async (request) => service.changeStatus(request.params.id, request.body.status, request.user))
 
   app.put('/reports/:id/technician', {
     schema: {
@@ -101,7 +103,7 @@ export async function apiRoutes(app, options) {
       response: { 200: { $ref: 'Report#' }, ...errorResponses },
     },
   }, async (request) =>
-    service.assignTechnician(request.params.id, request.body.technician)
+    service.assignTechnician(request.params.id, request.body.technician, request.user)
   )
 
   app.post('/reports/:id/comments', {
@@ -112,7 +114,7 @@ export async function apiRoutes(app, options) {
       response: { 201: { $ref: 'Activity#' }, ...errorResponses },
     },
   }, async (request, reply) => {
-    const activity = await service.addComment(request.params.id, request.body.message)
+    const activity = await service.addComment(request.params.id, request.body.message, request.user)
     return reply.code(201).send(activity)
   })
 
@@ -125,7 +127,7 @@ export async function apiRoutes(app, options) {
         ...errorResponses,
       },
     },
-  }, async (request) => service.getActivity(request.params.id))
+  }, async (request) => service.getActivity(request.params.id, request.user))
 
   app.get('/reports/:id/sla', {
     schema: {
@@ -133,7 +135,7 @@ export async function apiRoutes(app, options) {
       params: idParams,
       response: { 200: slaResponse, ...errorResponses },
     },
-  }, async (request) => service.getSla(request.params.id))
+  }, async (request) => service.getSla(request.params.id, request.user))
 
   app.get('/metrics', {
     schema: {

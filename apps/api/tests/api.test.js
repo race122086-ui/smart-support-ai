@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildApp } from '../src/app.js'
+import { hashPassword } from '../src/auth/auth-service.js'
 import { MemoryRepository } from '../src/repositories/memory-repository.js'
 
 const validReport = {
@@ -14,7 +15,12 @@ const validReport = {
 
 async function createTestApp() {
   let sequence = 0
-  return buildApp({
+  const repository = new MemoryRepository({ users: [{
+    id: 'admin-test', name: 'Admin Test', email: 'admin@example.test',
+    passwordHash: await hashPassword('SeguraPruebas123'), role: 'ADMIN', active: true,
+    createdAt: '2026-07-29T12:00:00.000Z', updatedAt: '2026-07-29T12:00:00.000Z',
+  }] })
+  const app = await buildApp({
     logger: false,
     config: {
       host: '127.0.0.1',
@@ -22,12 +28,18 @@ async function createTestApp() {
       corsOrigin: 'http://localhost:5173',
       logLevel: 'silent',
     },
-    repository: new MemoryRepository(),
+    repository,
     serviceOptions: {
       clock: () => new Date('2026-07-29T12:00:00.000Z'),
       idFactory: () => `id-${++sequence}`,
     },
   })
+  const originalInject = app.inject.bind(app)
+  const login = await originalInject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'admin@example.test', password: 'SeguraPruebas123' } })
+  const cookie = login.headers['set-cookie'].split(';')[0]
+  const csrfToken = login.json().csrfToken
+  app.inject = (options) => originalInject({ ...options, headers: { cookie, 'x-csrf-token': csrfToken, ...options.headers } })
+  return app
 }
 
 test('publica salud, CORS limitado y contrato OpenAPI', async (t) => {
@@ -50,6 +62,8 @@ test('publica salud, CORS limitado y contrato OpenAPI', async (t) => {
   assert.equal(spec.statusCode, 200)
   assert.equal(spec.json().info.title, 'SmartSupport API')
   assert.ok(spec.json().paths['/api/v1/reports'])
+  assert.ok(spec.json().paths['/api/v1/reports'].get.responses['401'])
+  assert.ok(spec.json().paths['/api/v1/reports'].get.responses['403'])
 })
 
 test('cubre el ciclo de reportes, actividad, notificaciones, SLA y métricas', async (t) => {

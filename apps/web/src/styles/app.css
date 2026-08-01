@@ -243,3 +243,77 @@ textarea:focus-visible {
     padding: 1rem;
   }
 }
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: var(--page-bg, #f4f7fb);
+}
+
+.login-card {
+  width: min(100%, 28rem);
+  padding: 2rem;
+  border-radius: var(--radius-lg, 1rem);
+  background: white;
+  box-shadow: var(--shadow-lg, 0 1rem 3rem rgb(15 23 42 / 12%));
+}
+
+.login-card form,
+.user-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.login-card label,
+.user-form label {
+  display: grid;
+  gap: .4rem;
+  font-weight: 600;
+}
+
+.login-card input,
+.user-form input,
+.user-form select {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: .65rem .8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: .6rem;
+}
+
+.form-error {
+  color: #b91c1c;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.users-table th,
+.users-table td {
+  padding: .8rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.topbar-user__details small {
+  display: block;
+  color: #64748b;
+}
+
+@media (max-width: 700px) {
+  .login-card {
+    padding: 1.25rem;
+  }
+
+  .user-form {
+    grid-template-columns: 1fr;
+  }
+}

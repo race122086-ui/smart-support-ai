@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSession } from '../../app/session.jsx'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { api } from '../../api/client.js'
 import { queryKeys, useApiMutation, useApiQuery } from '../../api/queries.js'
@@ -7,13 +8,14 @@ import { PwaInstall } from '../ui/PwaInstall.jsx'
 import { formatDate } from '../../utils/format.js'
 
 const navigation = [
-  ['/', 'Dashboard'],
-  ['/tickets', 'Tickets de soporte'],
-  ['/tickets/new', 'Nuevo ticket'],
-  ['/technicians', 'Técnicos'],
-  ['/activity', 'Actividad'],
-  ['/reports', 'Reportes'],
-  ['/settings', 'Configuración'],
+  ['/', 'Dashboard', ['ADMIN', 'TECHNICIAN', 'USER']],
+  ['/tickets', 'Tickets de soporte', ['ADMIN', 'TECHNICIAN', 'USER']],
+  ['/tickets/new', 'Nuevo ticket', ['ADMIN', 'USER']],
+  ['/technicians', 'Técnicos', ['ADMIN', 'TECHNICIAN']],
+  ['/activity', 'Actividad', ['ADMIN', 'TECHNICIAN']],
+  ['/reports', 'Reportes', ['ADMIN']],
+  ['/users', 'Usuarios', ['ADMIN']],
+  ['/settings', 'Configuración', ['ADMIN']],
 ]
 
 function NotificationsDialog({ onClose }) {
@@ -62,10 +64,11 @@ function NotificationsDialog({ onClose }) {
 
 export function AppShell() {
   const navigate = useNavigate()
+  const session = useSession()
+  const visibleNavigation = navigation.filter(([, , roles]) => roles.includes(session.user.role))
   const [query, setQuery] = useState('')
   const [showNotifications, setShowNotifications] = useState(false)
-  const notifications = useApiQuery(queryKeys.notifications, api.listNotifications)
-  const settings = useApiQuery(queryKeys.settings, api.getSettings)
+  const notifications = useApiQuery(queryKeys.notifications, api.listNotifications, { enabled: session.user.role === 'ADMIN' })
   const unread = notifications.data?.filter((item) => !item.read).length || 0
 
   function search(event) {
@@ -83,13 +86,13 @@ export function AppShell() {
         </NavLink>
         <nav className="sidebar-nav" aria-label="Navegación principal">
           <span>WORKSPACE</span>
-          {navigation.slice(0, 3).map(([to, label]) => (
+          {visibleNavigation.slice(0, 3).map(([to, label]) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'is-active' : ''}>
               <i aria-hidden="true">●</i><b>{label}</b>
             </NavLink>
           ))}
           <span>ADMINISTRAR</span>
-          {navigation.slice(3).map(([to, label]) => (
+          {visibleNavigation.slice(3).map(([to, label]) => (
             <NavLink key={to} to={to} className={({ isActive }) => isActive ? 'is-active' : ''}>
               <i aria-hidden="true">●</i><b>{label}</b>
             </NavLink>
@@ -106,18 +109,18 @@ export function AppShell() {
           </form>
           <div className="topbar-actions">
             <PwaInstall />
-            <button type="button" className="header-icon-button" aria-label={`Abrir notificaciones, ${unread} sin leer`} onClick={() => setShowNotifications(true)}>
+            {session.user.role === 'ADMIN' && <button type="button" className="header-icon-button" aria-label={`Abrir notificaciones, ${unread} sin leer`} onClick={() => setShowNotifications(true)}>
               🔔<span>{unread}</span>
-            </button>
+            </button>}
             <div className="topbar-user">
-              <span>{settings.data?.profile?.name?.[0]?.toUpperCase() || 'A'}</span>
-              <div className="topbar-user__details"><strong>{settings.data?.profile?.name || 'Administrador'}</strong></div>
+              <span>{session.user.name[0]?.toUpperCase() || 'U'}</span>
+              <div className="topbar-user__details"><strong>{session.user.name}</strong><small>{session.user.role}</small></div><button type="button" className="btn btn--secondary" onClick={() => session.logout()}>Salir</button>
             </div>
           </div>
         </header>
         <main className="workspace-content"><Outlet /></main>
       </section>
-      {showNotifications && <NotificationsDialog onClose={() => setShowNotifications(false)} />}
+      {showNotifications && session.user.role === 'ADMIN' && <NotificationsDialog onClose={() => setShowNotifications(false)} />}
     </div>
   )
 }

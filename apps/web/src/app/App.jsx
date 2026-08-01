@@ -3,6 +3,7 @@ import { RouterProvider } from 'react-router-dom'
 import { ErrorBoundary } from '../components/ui/ErrorBoundary.jsx'
 import { ToastProvider } from '../components/ui/Feedback.jsx'
 import { queryClient } from './query-client.js'
+import { SessionProvider } from './session.jsx'
 import { router } from './router.jsx'
 
 export function App() {
@@ -10,7 +11,9 @@ export function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
-          <RouterProvider router={router} />
+          <SessionProvider>
+            <RouterProvider router={router} />
+          </SessionProvider>
         </ToastProvider>
       </QueryClientProvider>
     </ErrorBoundary>

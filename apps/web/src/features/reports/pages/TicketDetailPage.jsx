@@ -3,19 +3,21 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../api/client.js'
+import { useSession } from '../../../app/session.jsx'
 import { invalidateReportData, queryKeys, useApiQuery, useReport } from '../../../api/queries.js'
 import { ConfirmDialog, ErrorState, LoadingState, useToast } from '../../../components/ui/Feedback.jsx'
 import { formatDate, formatTicket, priorityClass, statusClass } from '../../../utils/format.js'
 
 export function TicketDetailPage() {
   const { id } = useParams()
+  const { user } = useSession()
   const navigate = useNavigate()
   const client = useQueryClient()
   const notify = useToast()
   const [comment, setComment] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const report = useReport(id)
-  const technicians = useApiQuery(queryKeys.technicians, api.listTechnicians)
+  const technicians = useApiQuery(queryKeys.technicians, api.listTechnicians, { enabled: user.role !== 'USER' })
   const activity = useApiQuery(queryKeys.activity(id), () => api.getActivity(id))
   const sla = useApiQuery(queryKeys.sla(id), () => api.getSla(id))
 
@@ -47,21 +49,21 @@ export function TicketDetailPage() {
     <>
       <div className="page-heading">
         <div><span className="page-kicker">DETALLE</span><h2>{formatTicket(item.ticketNumber)} · {item.userName}</h2><p>Creado el {formatDate(item.createdAt)}</p></div>
-        <div className="report-card__actions"><Link className="btn btn--secondary" to="/tickets">Volver</Link><Link className="btn btn--primary" to={`/tickets/${id}/edit`}>Editar</Link><button className="btn btn--danger" type="button" onClick={() => setConfirmDelete(true)}>Eliminar</button></div>
+        <div className="report-card__actions"><Link className="btn btn--secondary" to="/tickets">Volver</Link>{['ADMIN', 'USER'].includes(user.role) && <Link className="btn btn--primary" to={`/tickets/${id}/edit`}>Editar</Link>}{user.role === 'ADMIN' && <button className="btn btn--danger" type="button" onClick={() => setConfirmDelete(true)}>Eliminar</button>}</div>
       </div>
       {mutation.isError && <ErrorState error={mutation.error} />}
       <article className="workspace-card ticket-detail">
         <div className="report-card__meta"><span className={priorityClass(item.priority)}>{item.priority}</span><span className={statusClass(item.status)}>{item.status}</span><span>{item.department}</span></div>
         <p className="ticket-detail__description">{item.description}</p>
         <dl className="ticket-detail__contact"><div><dt>Correo</dt><dd><a href={`mailto:${item.contactEmail}`}>{item.contactEmail}</a></dd></div><div><dt>Teléfono</dt><dd>{item.contactPhone}</dd></div><div><dt>SLA</dt><dd className={sla.data?.overdue ? 'danger-text' : ''}>{sla.data ? `${sla.data.overdue ? 'Vencido' : 'Vence'}: ${formatDate(sla.data.deadline)}` : 'Calculando…'}</dd></div></dl>
-        <div className="report-card__assignment">
+        {user.role !== 'USER' && <div className="report-card__assignment">
           <label htmlFor="detail-technician">Técnico responsable</label>
-          <select id="detail-technician" className="technician-select" value={item.technician} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ action: 'technician', value: event.target.value })}>
+          <select id="detail-technician" className="technician-select" value={item.technician} disabled={mutation.isPending || (user.role === 'TECHNICIAN' && item.technician !== UNASSIGNED_TECHNICIAN)} onChange={(event) => mutation.mutate({ action: 'technician', value: event.target.value })}>
             <option>{UNASSIGNED_TECHNICIAN}</option>{technicians.data?.map((technician) => <option key={technician.id}>{technician.name}</option>)}
           </select>
           <label htmlFor="detail-status">Estado del ticket</label>
           <select id="detail-status" className="status-select" value={item.status} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ action: 'status', value: event.target.value })}>{STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
-        </div>
+        </div>}
         <section className="activity" aria-labelledby="activity-title">
           <h3 id="activity-title">Historial de actividad</h3>
           <ul className="activity-list">{[...activities].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map((entry) => <li className="activity-item" key={entry.id}><span>{entry.message}</span><time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time></li>)}</ul>

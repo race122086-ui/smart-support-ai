@@ -131,3 +131,14 @@ cualquier transición entre los tres estados válidos está permitida.
   normalizarse devuelve `422`.
 
 La importación debe ser atómica: un error no sustituye parcialmente los datos.
+
+## Autenticación
+
+- `POST /api/v1/auth/login`: crea sesión en cookie HttpOnly y devuelve el
+  usuario actual y un token CSRF.
+- `GET /api/v1/auth/me`: valida la sesión y rota el token CSRF.
+- `POST /api/v1/auth/logout`: revoca la sesión persistente.
+- `GET|POST|PATCH /api/v1/users`: administración exclusiva de `ADMIN`.
+
+Las rutas protegidas documentan `401` para sesión ausente o inválida y `403`
+para permisos o CSRF insuficientes.

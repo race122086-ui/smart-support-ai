@@ -169,7 +169,7 @@ export const backupResponse = {
   additionalProperties: false,
   required: ['version', 'reports', 'settings', 'notifications'],
   properties: {
-    version: { type: 'integer', const: 1 },
+    version: { type: 'integer', const: 2 },
     reports: { type: 'array', items: { $ref: 'Report#' } },
     settings: { $ref: 'Settings#' },
     notifications: { type: 'array', items: { $ref: 'Notification#' } },

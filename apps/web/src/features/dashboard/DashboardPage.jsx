@@ -1,19 +1,29 @@
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client.js'
+import { useSession } from '../../app/session.jsx'
 import { queryKeys, useApiQuery, useReports } from '../../api/queries.js'
 import { ErrorState, LoadingState } from '../../components/ui/Feedback.jsx'
 import { formatDate, formatTicket } from '../../utils/format.js'
 
 export function DashboardPage() {
-  const metrics = useApiQuery(queryKeys.metrics, api.getMetrics)
-  const reports = useReports({ sort: 'recent', page: 1, pageSize: 5 })
-  if (metrics.isLoading || reports.isLoading) return <LoadingState message="Preparando el dashboard…" />
-  if (metrics.isError || reports.isError) return <ErrorState error={metrics.error || reports.error} onRetry={() => { metrics.refetch(); reports.refetch() }} />
-  const data = metrics.data
+  const { user } = useSession()
+  const metrics = useApiQuery(queryKeys.metrics, api.getMetrics, { enabled: user.role === 'ADMIN' })
+  const reports = useReports({ sort: 'recent', page: 1, pageSize: user.role === 'ADMIN' ? 5 : 100 })
+  if ((user.role === 'ADMIN' && metrics.isLoading) || reports.isLoading) return <LoadingState message="Preparando el dashboard…" />
+  if ((user.role === 'ADMIN' && metrics.isError) || reports.isError) return <ErrorState error={metrics.error || reports.error} onRetry={() => { metrics.refetch(); reports.refetch() }} />
+  const visible = reports.data.items
+  const derived = {
+    total: reports.data.total,
+    pending: visible.filter((item) => item.status === 'Pendiente').length,
+    inProgress: visible.filter((item) => item.status === 'En progreso').length,
+    resolved: visible.filter((item) => item.status === 'Resuelto').length,
+  }
+  derived.resolutionRate = derived.total ? Math.round((derived.resolved / derived.total) * 100) : 0
+  const data = metrics.data || derived
 
   return (
     <>
-      <div className="page-heading"><div><span className="page-kicker">CENTRO DE OPERACIONES</span><h2>Resumen operativo</h2><p>Visión general del servicio técnico.</p></div><Link className="btn btn--primary" to="/tickets/new">Nueva incidencia</Link></div>
+      <div className="page-heading"><div><span className="page-kicker">CENTRO DE OPERACIONES</span><h2>Resumen operativo</h2><p>Visión general del servicio técnico.</p></div>{user.role !== 'TECHNICIAN' && <Link className="btn btn--primary" to="/tickets/new">Nueva incidencia</Link>}</div>
       <section className="hero-summary">
         <div className="hero-summary__content"><span className="hero-summary__eyebrow"><i></i> ESTADO ACTUAL</span><h2>{data.pending ? `${data.pending} incidencias requieren seguimiento` : 'Todas las incidencias están atendidas'}</h2><p>La tasa global de resolución es de <strong>{data.resolutionRate}%</strong>.</p><div className="hero-summary__actions"><Link className="btn btn--hero" to="/tickets?status=Pendiente">Ver pendientes</Link></div></div>
         <div className="hero-summary__visual"><div className="resolution-ring" style={{ '--progress': `${data.resolutionRate * 3.6}deg` }}><div><strong>{data.resolutionRate}%</strong><span>resolución</span></div></div></div>

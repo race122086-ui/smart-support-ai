@@ -7,6 +7,43 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  ADMIN
+  TECHNICIAN
+  USER
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  name         String
+  email        String       @unique
+  passwordHash String       @map("password_hash")
+  role         UserRole     @default(USER)
+  active       Boolean      @default(true)
+  technician   Technician?
+  reports      Report[]
+  sessions     Session[]
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([role, active])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  csrfHash  String   @map("csrf_hash")
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
 model Report {
   id           String           @id @default(uuid()) @db.Uuid
   ticketNumber Int              @unique @map("ticket_number")
@@ -19,6 +56,8 @@ model Report {
   status       String
   technicianId String?          @map("technician_id") @db.Uuid
   technician   Technician?      @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+  createdById  String?          @map("created_by_id") @db.Uuid
+  createdBy    User?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
   activities   ReportActivity[]
   createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -26,6 +65,7 @@ model Report {
   @@index([status])
   @@index([priority])
   @@index([technicianId])
+  @@index([createdById])
   @@index([createdAt])
   @@map("reports")
 }
@@ -48,6 +88,8 @@ model Technician {
   name           String
   normalizedName String   @unique @map("normalized_name")
   active         Boolean  @default(true)
+  userId         String?  @unique @map("user_id") @db.Uuid
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   reports        Report[]
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

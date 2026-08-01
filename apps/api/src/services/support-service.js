@@ -60,6 +60,22 @@ export class SupportService {
     return this.clock().toISOString()
   }
 
+  forbidden() {
+    throw new DomainError('FORBIDDEN', 'No tienes permiso para realizar esta acción', 403)
+  }
+
+  canAccessReport(report, actor) {
+    if (actor.role === 'ADMIN') return true
+    if (actor.role === 'USER') return report.createdById === actor.id
+    return report.technician === UNASSIGNED_TECHNICIAN
+      || report.technicianId === actor.technicianId
+      || report.technician === actor.name
+  }
+
+  assertReportAccess(report, actor) {
+    if (!this.canAccessReport(report, actor)) this.forbidden()
+  }
+
   activity(message, now = this.now()) {
     return { id: this.idFactory(), message, createdAt: now }
   }
@@ -73,9 +89,10 @@ export class SupportService {
     })
   }
 
-  async listReports(filters = {}) {
+  async listReports(filters = {}, actor) {
     const settings = await this.repository.getSettings()
     let items = await this.repository.listReports()
+    items = items.filter((report) => this.canAccessReport(report, actor))
     const query = normalizedText(filters.q).toLowerCase()
     if (query) {
       items = items.filter((report) =>
@@ -108,13 +125,18 @@ export class SupportService {
     return { items: items.slice(start, start + pageSize), total, page, pageSize }
   }
 
-  async getReport(id) {
+  async getReport(id, actor) {
     const report = await this.repository.getReport(id)
     if (!report) throw notFound('Reporte')
+    this.assertReportAccess(report, actor)
     return report
   }
 
-  async createReport(input) {
+  async createReport(input, actor) {
+    if (actor.role === 'TECHNICIAN') this.forbidden()
+    if (actor.role === 'USER') {
+      input = { ...input, userName: actor.name, contactEmail: actor.email }
+    }
     return this.repository.transaction(async (repository) => {
       const ticketNumber = await repository.nextTicketNumber()
       const now = this.now()
@@ -128,6 +150,7 @@ export class SupportService {
           ])
         ),
         status: 'Pendiente',
+        createdById: actor.id,
         technician: UNASSIGNED_TECHNICIAN,
         createdAt: now,
         activity: [this.activity('Reporte creado', now)],
@@ -142,10 +165,12 @@ export class SupportService {
     })
   }
 
-  async updateReport(id, changes) {
+  async updateReport(id, changes, actor) {
+    if (!['ADMIN', 'USER'].includes(actor.role)) this.forbidden()
     return this.repository.transaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
+      this.assertReportAccess(report, actor)
       for (const field of editableFields) {
         if (field in changes) {
           report[field] = typeof changes[field] === 'string'
@@ -161,14 +186,16 @@ export class SupportService {
     })
   }
 
-  async deleteReport(id) {
+  async deleteReport(id, actor) {
+    if (actor.role !== 'ADMIN') this.forbidden()
     return this.repository.transaction(async (repository) => {
       if (!await repository.getReport(id)) throw notFound('Reporte')
       await repository.removeReport(id)
     })
   }
 
-  async changeStatus(id, status) {
+  async changeStatus(id, status, actor) {
+    if (!['ADMIN', 'TECHNICIAN'].includes(actor.role)) this.forbidden()
     if (!STATUSES.includes(status)) {
       throw new DomainError(
         'INVALID_STATUS_TRANSITION',
@@ -179,6 +206,8 @@ export class SupportService {
     return this.repository.transaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
+      this.assertReportAccess(report, actor)
+      if (actor.role === 'TECHNICIAN' && report.technician !== actor.name) this.forbidden()
       const now = this.now()
       report.status = status
       report.activity.push(this.activity(`Estado cambiado a ${status}`, now))
@@ -188,10 +217,15 @@ export class SupportService {
     })
   }
 
-  async assignTechnician(id, technicianName) {
+  async assignTechnician(id, technicianName, actor) {
+    if (!['ADMIN', 'TECHNICIAN'].includes(actor.role)) this.forbidden()
     return this.repository.transaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
+      if (actor.role === 'TECHNICIAN') {
+        if (report.technician !== UNASSIGNED_TECHNICIAN || technicianName !== actor.name) this.forbidden()
+        technicianName = actor.name
+      }
       if (technicianName !== UNASSIGNED_TECHNICIAN) {
         const technicians = await repository.listTechnicians()
         const available = technicians.some(
@@ -217,10 +251,11 @@ export class SupportService {
     })
   }
 
-  async addComment(id, message) {
+  async addComment(id, message, actor) {
     return this.repository.transaction(async (repository) => {
       const report = await repository.getReport(id)
       if (!report) throw notFound('Reporte')
+      this.assertReportAccess(report, actor)
       const now = this.now()
       const activity = this.activity(`Comentario: ${message.trim()}`, now)
       report.activity.push(activity)
@@ -230,8 +265,8 @@ export class SupportService {
     })
   }
 
-  async getActivity(id) {
-    const report = await this.getReport(id)
+  async getActivity(id, actor) {
+    const report = await this.getReport(id, actor)
     return [...report.activity].sort(
       (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
     )
@@ -241,8 +276,8 @@ export class SupportService {
     return new Date(report.createdAt).getTime() + Number(sla[report.priority]) * 3600000
   }
 
-  async getSla(id) {
-    const report = await this.getReport(id)
+  async getSla(id, actor) {
+    const report = await this.getReport(id, actor)
     const settings = await this.repository.getSettings()
     const deadline = this.slaDeadline(report, settings.sla)
     return {
@@ -363,7 +398,7 @@ export class SupportService {
     return this.repository.transaction(async (repository) => {
       const snapshot = await repository.snapshot()
       return {
-        version: 1,
+        version: 2,
         reports: snapshot.reports,
         settings: {
           ...snapshot.settings,
@@ -420,7 +455,7 @@ export class SupportService {
         400
       )
     }
-    if (backup.version !== undefined && backup.version !== 1) {
+    if (backup.version !== undefined && ![1, 2].includes(backup.version)) {
       throw new DomainError(
         'UNSUPPORTED_BACKUP_VERSION',
         'La versión del respaldo no es compatible',
@@ -494,6 +529,13 @@ export class SupportService {
     return this.repository.transaction(async (repository) => {
       const previous = await repository.getImport(fingerprint)
       if (previous) return { ...previous.result, duplicate: true }
+      const existingTechnicians = await repository.listTechnicians()
+      for (const technician of technicians) {
+        const existing = existingTechnicians.find((item) =>
+          item.name.toLocaleLowerCase('es-MX') === technician.name.toLocaleLowerCase('es-MX')
+        )
+        if (existing?.userId) technician.userId = existing.userId
+      }
       await repository.replace({ reports, settings, technicians, notifications })
       await repository.saveImport(fingerprint, result)
       return result

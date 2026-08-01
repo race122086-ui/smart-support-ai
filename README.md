@@ -241,3 +241,49 @@ información importante, ya que estas pruebas limpian las tablas operativas.
 - `docs/casos-de-uso.md`: comportamiento funcional y reglas de los flujos principales.
 - `docs/contrato-api.md`: recursos, validaciones y respuestas del contrato HTTP.
 - `docs/planes/README.md`: índice de los planes de evolución técnica del proyecto.
+
+## Autenticación y roles
+
+Todas las rutas bajo `/api/v1`, salvo `POST /auth/login`, requieren una
+sesión válida. La sesión usa una cookie HttpOnly y las mutaciones requieren el
+encabezado CSRF entregado por `/auth/login` o `/auth/me`. El frontend no
+guarda tokens en `localStorage`.
+
+En producción, `NODE_ENV=production` exige `DATABASE_URL`; el repositorio
+por archivo continúa disponible únicamente para desarrollo sin esa variable.
+
+### Crear el primer administrador
+
+El comando es manual y no se ejecuta durante el arranque:
+
+```sh
+ADMIN_NAME='Administración' \
+ADMIN_EMAIL='admin@example.com' \
+ADMIN_PASSWORD='una contraseña temporal segura' \
+npm run admin:create
+```
+
+La contraseña debe tener entre 12 y 128 caracteres e incluir mayúscula,
+minúscula y número. El comando rechaza correos duplicados y no imprime la
+contraseña. Conviene retirar `ADMIN_PASSWORD` del entorno inmediatamente
+después de ejecutarlo.
+
+### Migraciones
+
+Para una base local o de pruebas se deben aplicar migraciones versionadas. No
+se usa `db push`:
+
+```sh
+npm run db:generate
+npm run db:deploy
+```
+
+La migración `20260731000000_authentication_and_authorization` agrega usuarios,
+sesiones y relaciones opcionales. Los reportes previos quedan deliberadamente
+con `created_by_id = NULL`: solo un administrador puede administrarlos; un
+técnico puede verlos si están sin asignar o asignados a él. Nunca se infiere un
+propietario a partir del nombre o correo histórico.
+
+Los respaldos nuevos usan la versión 2. No contienen hashes de contraseña,
+sesiones ni tokens. Los respaldos versión 1 siguen siendo importables y sus
+reportes se consideran históricos sin propietario.

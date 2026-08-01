@@ -27,6 +27,8 @@ function mapReport(report) {
     priority: report.priority,
     status: report.status,
     technician: report.technician?.name || UNASSIGNED_TECHNICIAN,
+    technicianId: report.technicianId || null,
+    createdById: report.createdById || null,
     createdAt: report.createdAt.toISOString(),
     activity: (report.activities || []).map(mapActivity),
   }
@@ -186,6 +188,7 @@ export class PrismaRepository {
       priority: report.priority,
       status: report.status,
       technicianId: technician?.id || null,
+      createdById: report.createdById || null,
       createdAt: new Date(report.createdAt),
     }
     await this.client.report.upsert({
@@ -250,7 +253,7 @@ export class PrismaRepository {
 
   async listTechnicians() {
     return this.client.technician.findMany({
-      select: { id: true, name: true, active: true },
+      select: { id: true, name: true, active: true, userId: true },
       orderBy: { name: 'asc' },
     })
   }
@@ -258,14 +261,15 @@ export class PrismaRepository {
   async saveTechnician(technician) {
     return this.client.technician.upsert({
       where: { normalizedName: normalizeName(technician.name) },
-      update: { name: technician.name, active: technician.active },
+      update: { name: technician.name, active: technician.active, userId: technician.userId || null },
       create: {
         id: technician.id,
         name: technician.name,
         normalizedName: normalizeName(technician.name),
         active: technician.active,
+        userId: technician.userId || null,
       },
-      select: { id: true, name: true, active: true },
+      select: { id: true, name: true, active: true, userId: true },
     })
   }
 
@@ -307,6 +311,63 @@ export class PrismaRepository {
       })
     }
     return this.listNotifications()
+  }
+
+  async listUsers() {
+    return this.client.user.findMany({ orderBy: { name: 'asc' } })
+  }
+
+  async getUser(id) {
+    return this.client.user.findUnique({ where: { id } })
+  }
+
+  async getUserByEmail(email) {
+    return this.client.user.findUnique({ where: { email } })
+  }
+
+  async saveUser(user) {
+    const data = {
+      name: user.name,
+      email: user.email,
+      passwordHash: user.passwordHash,
+      role: user.role,
+      active: user.active,
+    }
+    return this.client.user.upsert({
+      where: { id: user.id },
+      update: data,
+      create: { id: user.id, ...data },
+    })
+  }
+
+  async saveSession(session) {
+    return this.client.session.create({ data: {
+      id: session.id,
+      tokenHash: session.tokenHash,
+      csrfHash: session.csrfHash,
+      userId: session.userId,
+      expiresAt: new Date(session.expiresAt),
+    } })
+  }
+
+  async getSessionByTokenHash(tokenHash) {
+    return this.client.session.findUnique({ where: { tokenHash }, include: { user: true } })
+  }
+
+  async updateSessionCsrf(tokenHash, csrfHash) {
+    await this.client.session.update({ where: { tokenHash }, data: { csrfHash } })
+  }
+
+  async removeSessionByTokenHash(tokenHash) {
+    await this.client.session.deleteMany({ where: { tokenHash } })
+  }
+
+  async removeUserSessions(userId) {
+    await this.client.session.deleteMany({ where: { userId } })
+  }
+
+  async removeExpiredSessions(now) {
+    await this.client.session.deleteMany({ where: { expiresAt: { lte: now } } })
   }
 
   async getImport(fingerprint) {

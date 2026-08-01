@@ -10,6 +10,7 @@ test('carga valores predeterminados seguros para desarrollo local', () => {
     logLevel: 'info',
     databaseUrl: null,
     dataFile: '.smartsupport/data.json',
+    production: false,
   })
 })
 
@@ -44,4 +45,18 @@ test('usa un archivo local solo cuando DATABASE_URL no existe', () => {
 
 test('permite que API_HOST sobrescriba el host inferido', () => {
   assert.equal(loadConfig({ PORT: '8080', API_HOST: '127.0.0.1' }).host, '127.0.0.1')
+})
+
+test('exige PostgreSQL en producción', () => {
+  assert.throws(
+    () => loadConfig({ NODE_ENV: 'production' }),
+    /DATABASE_URL es obligatoria en producción/
+  )
+  assert.equal(
+    loadConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://local:test@127.0.0.1:5432/smartsupport_test',
+    }).databaseUrl,
+    'postgresql://local:test@127.0.0.1:5432/smartsupport_test'
+  )
 })

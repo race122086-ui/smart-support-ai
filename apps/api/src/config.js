@@ -23,7 +23,12 @@ export function loadConfig(environment = process.env) {
   if (!['http:', 'https:'].includes(new URL(corsOrigin).protocol)) {
     throw new TypeError('API_CORS_ORIGIN debe usar HTTP o HTTPS')
   }
+  const production = environment.NODE_ENV === 'production'
+  if (production && !environment.DATABASE_URL) {
+    throw new TypeError('DATABASE_URL es obligatoria en producción')
+  }
   return {
+    production,
     host: environment.API_HOST || (environment.PORT ? '0.0.0.0' : '127.0.0.1'),
     port: parsePort(environment.PORT || environment.API_PORT),
     corsOrigin: parsedOrigin,

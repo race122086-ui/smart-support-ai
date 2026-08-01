@@ -10,6 +10,7 @@ export const queryKeys = {
   technicians: ['technicians'],
   settings: ['settings'],
   notifications: ['notifications'],
+  users: ['users'],
 }
 
 export function useReports(params) {
