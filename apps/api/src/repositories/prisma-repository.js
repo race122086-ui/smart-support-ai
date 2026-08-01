@@ -46,6 +46,23 @@ function mapNotification(notification) {
   }
 }
 
+function mapAttachment(attachment) {
+  return {
+    id: attachment.id,
+    reportId: attachment.reportId,
+    fileName: attachment.fileName,
+    storedName: attachment.storedName,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    storageKey: attachment.storageKey,
+    uploadedBy: attachment.uploadedBy?.name || null,
+    uploadedById: attachment.uploadedById || null,
+    createdAt: attachment.createdAt.toISOString(),
+  }
+}
+
+const attachmentInclude = { uploadedBy: { select: { name: true } } }
+
 const reportInclude = {
   technician: true,
   activities: { orderBy: { createdAt: 'desc' } },
@@ -137,6 +154,7 @@ export class PrismaRepository {
 
   async replace(snapshot) {
     await this.client.reportActivity.deleteMany()
+    await this.client.ticketAttachment.deleteMany()
     await this.client.report.deleteMany()
     await this.client.notification.deleteMany()
     await this.client.technician.deleteMany()
@@ -219,6 +237,54 @@ export class PrismaRepository {
 
   async removeReport(id) {
     const result = await this.client.report.deleteMany({ where: { id } })
+    return result.count > 0
+  }
+
+  async listAttachments(reportId) {
+    const rows = await this.client.ticketAttachment.findMany({
+      where: { reportId },
+      include: attachmentInclude,
+      orderBy: { createdAt: 'desc' },
+    })
+    return rows.map(mapAttachment)
+  }
+
+  async getAttachment(id) {
+    const row = await this.client.ticketAttachment.findUnique({
+      where: { id },
+      include: attachmentInclude,
+    })
+    return row ? mapAttachment(row) : null
+  }
+
+  async saveAttachment(attachment) {
+    await this.client.ticketAttachment.upsert({
+      where: { id: attachment.id },
+      update: {
+        fileName: attachment.fileName,
+        storedName: attachment.storedName,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        storageKey: attachment.storageKey,
+        uploadedById: attachment.uploadedById || null,
+      },
+      create: {
+        id: attachment.id,
+        reportId: attachment.reportId,
+        fileName: attachment.fileName,
+        storedName: attachment.storedName,
+        mimeType: attachment.mimeType,
+        size: attachment.size,
+        storageKey: attachment.storageKey,
+        uploadedById: attachment.uploadedById || null,
+        createdAt: new Date(attachment.createdAt),
+      },
+    })
+    return this.getAttachment(attachment.id)
+  }
+
+  async removeAttachment(id) {
+    const result = await this.client.ticketAttachment.deleteMany({ where: { id } })
     return result.count > 0
   }
 

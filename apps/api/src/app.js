@@ -1,4 +1,5 @@
 import cors from '@fastify/cors'
+import multipart from '@fastify/multipart'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
 import Fastify from 'fastify'
@@ -12,7 +13,9 @@ import { PrismaRepository } from './repositories/prisma-repository.js'
 import { apiRoutes, sharedSchemas } from './routes/api-routes.js'
 import { authRoutes } from './routes/auth-routes.js'
 import { SupportService } from './services/support-service.js'
+import { AttachmentService } from './services/attachment-service.js'
 import { MailService } from './services/mail-service.js'
+import { createAttachmentStorage } from './storage/attachment-storage.js'
 
 function validationDetails(validation = []) {
   return validation.map((issue) => ({
@@ -22,7 +25,17 @@ function validationDetails(validation = []) {
 }
 
 export async function buildApp(options = {}) {
-  const config = options.config || loadConfig()
+  const baseConfig = options.config || loadConfig()
+  const config = {
+    ...baseConfig,
+    storageDriver: baseConfig.storageDriver || (baseConfig.s3?.bucket ? 's3' : 'local'),
+    attachment: {
+      maxBytes: 10 * 1024 * 1024,
+      maxCount: 5,
+      localDir: '.smartsupport/uploads',
+      ...(baseConfig.attachment || {}),
+    },
+  }
   const app = Fastify({
     logger: options.logger ?? { level: config.logLevel },
     bodyLimit: 1024 * 1024,
@@ -42,8 +55,18 @@ export async function buildApp(options = {}) {
     mailService,
   })
   const authService = options.authService || new AuthService(repository, options.authOptions)
+  const attachmentStorage = options.attachmentStorage || createAttachmentStorage(config)
+  const attachmentService = options.attachmentService || new AttachmentService(repository, attachmentStorage, {
+    support: service,
+    maxBytes: config.attachment.maxBytes,
+    maxCount: config.attachment.maxCount,
+  })
 
   if (repository.connect) await repository.connect()
+
+  await app.register(multipart, {
+    limits: { fileSize: config.attachment.maxBytes + 1, files: 1 },
+  })
 
   await app.register(cors, {
     origin: config.corsOrigin,
@@ -68,6 +91,7 @@ export async function buildApp(options = {}) {
         { name: 'Notificaciones' },
         { name: 'Métricas' },
         { name: 'Respaldos' },
+        { name: 'Adjuntos' },
       ],
     },
   })
@@ -159,6 +183,8 @@ export async function buildApp(options = {}) {
     service,
     authService,
     notificationHub,
+    attachmentService,
+    attachmentConfig: config.attachment,
   })
 
   app.decorate('supportRepository', repository)

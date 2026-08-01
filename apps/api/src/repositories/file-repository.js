@@ -18,6 +18,7 @@ function validateStoredData(value) {
   }
   value.users = Array.isArray(value.users) ? value.users : []
   value.sessions = Array.isArray(value.sessions) ? value.sessions : []
+  value.attachments = Array.isArray(value.attachments) ? value.attachments : []
   if (value.imports !== undefined && !Array.isArray(value.imports)) {
     throw new TypeError('El historial de importaciones local no es válido')
   }
@@ -120,6 +121,18 @@ export class FileRepository extends MemoryRepository {
 
   async saveNotification(notification) {
     const result = await super.saveNotification(notification)
+    await this.persistOutsideTransaction()
+    return result
+  }
+
+  async saveAttachment(attachment) {
+    const result = await super.saveAttachment(attachment)
+    await this.persistOutsideTransaction()
+    return result
+  }
+
+  async removeAttachment(id) {
+    const result = await super.removeAttachment(id)
     await this.persistOutsideTransaction()
     return result
   }

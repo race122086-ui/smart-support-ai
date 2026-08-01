@@ -919,6 +919,54 @@ p {
   color: #fff;
 }
 
+.attachment-list {
+  margin: 0.7rem 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid rgba(42, 47, 66, 0.6);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+}
+
+.attachment-item {
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  border-bottom: 1px solid rgba(42, 47, 66, 0.6);
+  font-size: 0.75rem;
+}
+
+.attachment-item:last-child {
+  border-bottom: none;
+}
+
+.attachment-item__name {
+  flex: 1 1 180px;
+  color: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-item__meta {
+  color: #64748b;
+  font-size: 0.68rem;
+}
+
+.attachment-item__actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.empty-state__hint {
+  color: var(--text);
+  font-size: 0.75rem;
+  margin: 0.7rem 0;
+}
+
+
 .report-card__actions {
   display: flex;
   gap: 0.5rem;

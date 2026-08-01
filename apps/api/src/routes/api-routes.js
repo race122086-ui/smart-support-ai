@@ -1,5 +1,6 @@
 import {
   activitySchema,
+  attachmentSchema,
   errorSchema,
   notificationSchema,
   reportSchema,
@@ -7,6 +8,7 @@ import {
   technicianSchema,
 } from '@smartsupport/contracts'
 import {
+  attachmentParams,
   backupImportBody,
   backupResponse,
   commentBody,
@@ -23,6 +25,8 @@ import {
   technicianAssignmentBody,
   technicianCreateBody,
 } from '../schemas/api-schemas.js'
+import { DomainError, validationError } from '../errors/domain-error.js'
+import { attachmentDisposition } from '../services/attachment-validation.js'
 
 const errorResponses = {
   401: { $ref: 'Error#' },
@@ -34,7 +38,8 @@ const errorResponses = {
 }
 
 export async function apiRoutes(app, options) {
-  const { service, authService, notificationHub } = options
+  const { service, authService, notificationHub, attachmentService, attachmentConfig } = options
+  const uploadBodyLimit = attachmentConfig.maxBytes * attachmentConfig.maxCount + 1024 * 1024
 
   app.get('/reports', {
     schema: {
@@ -82,7 +87,86 @@ export async function apiRoutes(app, options) {
       response: { ...errorResponses },
     },
   }, async (request, reply) => {
+    await attachmentService.purgeReportBlobs(request.params.id, request.user)
     await service.deleteReport(request.params.id, request.user)
+    return reply.code(204).send()
+  })
+
+  app.post('/reports/:id/attachments', {
+    schema: {
+      tags: ['Adjuntos'],
+      params: idParams,
+      consumes: ['multipart/form-data'],
+      response: { 201: { $ref: 'Attachment#' }, ...errorResponses },
+    },
+    bodyLimit: uploadBodyLimit,
+  }, async (request, reply) => {
+    let file
+    try {
+      file = await request.file()
+      if (!file) {
+        throw validationError('Se requiere un archivo para adjuntar', [
+          { field: 'file', reason: 'Archivo faltante' },
+        ])
+      }
+      const buffer = await file.toBuffer()
+      const attachment = await attachmentService.upload(request.params.id, {
+        filename: file.filename,
+        buffer,
+      }, request.user)
+      return reply.code(201).send(attachment)
+    } catch (error) {
+      if (error?.code === 'FST_REQ_FILE_TOO_LARGE') {
+        throw new DomainError(
+          'ATTACHMENT_TOO_LARGE',
+          `El archivo supera el límite de ${attachmentConfig.maxBytes} bytes`,
+          413
+        )
+      }
+      throw error
+    }
+  })
+
+  app.get('/reports/:id/attachments', {
+    schema: {
+      tags: ['Adjuntos'],
+      params: idParams,
+      response: {
+        200: { type: 'array', items: { $ref: 'Attachment#' } },
+        ...errorResponses,
+      },
+    },
+  }, async (request) => attachmentService.list(request.params.id, request.user))
+
+  app.get('/reports/:id/attachments/:attachmentId/download', {
+    schema: {
+      tags: ['Adjuntos'],
+      params: attachmentParams,
+      response: { ...errorResponses },
+    },
+  }, async (request, reply) => {
+    const { attachment, stream } = await attachmentService.download(
+      request.params.id,
+      request.params.attachmentId,
+      request.user
+    )
+    return reply
+      .header('Content-Type', attachment.mimeType)
+      .header('Content-Disposition', attachmentDisposition(attachment.fileName))
+      .header('Content-Length', String(attachment.size))
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Cache-Control', 'private, no-store')
+      .send(stream)
+  })
+
+  app.delete('/reports/:id/attachments/:attachmentId', {
+    schema: {
+      tags: ['Adjuntos'],
+      params: attachmentParams,
+      response: { ...errorResponses },
+    },
+  }, async (request, reply) => {
+    await attachmentService.remove(request.params.id, request.params.attachmentId, request.user)
     return reply.code(204).send()
   })
 
@@ -278,6 +362,7 @@ export async function apiRoutes(app, options) {
 
 export const sharedSchemas = [
   activitySchema,
+  attachmentSchema,
   errorSchema,
   notificationSchema,
   reportSchema,

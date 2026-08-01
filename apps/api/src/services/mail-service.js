@@ -20,7 +20,8 @@ function validEmail(value) {
 function eventTitle(eventType) {
   return ({ ticket_created: 'Ticket creado', technician_assigned: 'Técnico asignado',
     status_changed: 'Estado actualizado', comment_added: 'Nuevo comentario',
-    ticket_closed: 'Ticket cerrado' })[eventType] || 'Actualización del ticket'
+    ticket_closed: 'Ticket cerrado', attachment_added: 'Archivo adjuntado',
+    attachment_removed: 'Archivo eliminado' })[eventType] || 'Actualización del ticket'
 }
 
 function formatDate(value) {

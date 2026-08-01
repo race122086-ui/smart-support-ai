@@ -12,6 +12,13 @@ export function formatTicket(ticketNumber) {
   return `#${String(ticketNumber).padStart(4, '0')}`
 }
 
+export function formatBytes(value) {
+  const bytes = Number(value) || 0
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export function priorityClass(priority) {
   return `badge-priority badge-priority--${priority.toLocaleLowerCase('es-MX')}`
 }

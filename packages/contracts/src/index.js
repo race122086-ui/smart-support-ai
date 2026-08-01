@@ -116,6 +116,23 @@ export const notificationSchema = {
   },
 }
 
+export const attachmentSchema = {
+  $id: 'Attachment',
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'reportId', 'fileName', 'mimeType', 'size', 'uploadedById', 'createdAt'],
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    reportId: { type: 'string', minLength: 1 },
+    fileName: { type: 'string', minLength: 1 },
+    mimeType: { type: 'string', minLength: 1 },
+    size: { type: 'integer', minimum: 1 },
+    uploadedBy: { type: ['string', 'null'] },
+    uploadedById: { type: ['string', 'null'] },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+}
+
 export const settingsSchema = {
   $id: 'Settings',
   type: 'object',

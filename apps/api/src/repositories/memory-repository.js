@@ -29,6 +29,7 @@ export class MemoryRepository {
       notifications: clone(initialState.notifications || []).map(normalizeNotification),
       users: clone(initialState.users || []),
       sessions: clone(initialState.sessions || []),
+      attachments: clone(initialState.attachments || []),
     }
     this.imports = new Map()
   }
@@ -66,6 +67,7 @@ export class MemoryRepository {
       users: clone(snapshot.users || this.state.users),
       sessions: clone(snapshot.sessions || this.state.sessions),
       notifications: clone(snapshot.notifications || []).map(normalizeNotification),
+      attachments: clone(snapshot.attachments || []),
     }
   }
 
@@ -88,6 +90,27 @@ export class MemoryRepository {
     const index = this.state.reports.findIndex((report) => report.id === id)
     if (index === -1) return false
     this.state.reports.splice(index, 1)
+    this.state.attachments = this.state.attachments.filter((item) => item.reportId !== id)
+    return true
+  }
+
+  async listAttachments(reportId) {
+    return clone(this.state.attachments.filter((item) => item.reportId === reportId))
+  }
+
+  async getAttachment(id) {
+    return clone(this.state.attachments.find((item) => item.id === id) || null)
+  }
+
+  async saveAttachment(attachment) {
+    this.state.attachments.push(clone(attachment))
+    return clone(attachment)
+  }
+
+  async removeAttachment(id) {
+    const index = this.state.attachments.findIndex((item) => item.id === id)
+    if (index === -1) return false
+    this.state.attachments.splice(index, 1)
     return true
   }
 

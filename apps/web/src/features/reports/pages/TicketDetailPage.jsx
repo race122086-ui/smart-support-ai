@@ -7,6 +7,7 @@ import { useSession } from '../../../app/session.jsx'
 import { invalidateReportData, queryKeys, useApiQuery, useReport } from '../../../api/queries.js'
 import { ConfirmDialog, ErrorState, LoadingState, useToast } from '../../../components/ui/Feedback.jsx'
 import { formatDate, formatTicket, priorityClass, statusClass } from '../../../utils/format.js'
+import { AttachmentsSection } from '../components/AttachmentsSection.jsx'
 
 export function TicketDetailPage() {
   const { id } = useParams()
@@ -93,6 +94,7 @@ export function TicketDetailPage() {
             <label className="sr-only" htmlFor="comment">Agregar comentario</label><input id="comment" className="comment-input" value={comment} maxLength="160" onChange={(event) => setComment(event.target.value)} placeholder="Agregar comentario…" /><button className="btn btn--comment" type="submit" disabled={!comment.trim() || mutation.isPending}>Agregar</button>
           </form>
         </section>
+        <AttachmentsSection reportId={item.id} report={item} user={user} />
       </article>
       {confirmDelete && <ConfirmDialog title={`Eliminar ${formatTicket(item.ticketNumber)}`} onClose={() => setConfirmDelete(false)} onConfirm={() => mutation.mutate({ action: 'delete' })}>Esta acción eliminará la incidencia y su historial. No se puede deshacer.</ConfirmDialog>}
     </>

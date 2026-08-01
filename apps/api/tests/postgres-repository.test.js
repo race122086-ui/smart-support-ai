@@ -21,6 +21,7 @@ const validReport = {
 
 async function cleanDatabase(client) {
   await client.session.deleteMany()
+  await client.ticketAttachment.deleteMany()
   await client.reportActivity.deleteMany()
   await client.report.deleteMany()
   await client.notification.deleteMany()
@@ -84,4 +85,40 @@ integrationTest('revierte una importación completa cuando falla una restricció
     { code: 'REPORT_ALREADY_EXISTS' }
   )
   assert.deepEqual(await repository.snapshot(), before)
+})
+
+integrationTest('persiste metadatos de adjuntos y borra en cascada con el reporte', async (t) => {
+  const client = new PrismaClient({ datasourceUrl: databaseUrl })
+  const repository = new PrismaRepository(client)
+  await repository.connect()
+  await cleanDatabase(client)
+  await seedAdmin(repository)
+  const service = new SupportService(repository)
+  t.after(async () => {
+    await cleanDatabase(client)
+    await repository.disconnect()
+  })
+
+  const report = await service.createReport(validReport, admin)
+  const attachment = {
+    id: '00000000-0000-4000-8000-0000000000aa',
+    reportId: report.id,
+    fileName: 'captura.png',
+    storedName: 'captura.png',
+    mimeType: 'image/png',
+    size: 12,
+    storageKey: 'attachments/reporte-1/captura.png',
+    uploadedById: admin.id,
+    uploadedBy: admin.name,
+    createdAt: '2026-07-29T12:00:00.000Z',
+  }
+  await repository.saveAttachment(attachment)
+  assert.equal((await repository.listAttachments(report.id)).length, 1)
+  const stored = await repository.getAttachment(attachment.id)
+  assert.equal(stored.fileName, 'captura.png')
+  assert.equal(stored.storageKey, attachment.storageKey)
+
+  await repository.removeReport(report.id)
+  assert.equal((await repository.listAttachments(report.id)).length, 0)
+  assert.equal(await repository.getAttachment(attachment.id), null)
 })

@@ -100,6 +100,30 @@ npm run dev:api
 También existen variantes por workspace, como `test:web`, `test:api`,
 `build:web` y `build:api`.
 
+## Adjuntos de tickets
+
+Los tickets aceptan archivos adjuntos con validación real de contenido: la API
+comprueba la firma (magic bytes), la extensión y el tamaño antes de guardar. Los
+formatos permitidos son PNG, JPEG, GIF, WebP, PDF y texto (`txt`, `csv`, `md`,
+`log`, `json`). Los binarios nunca se almacenan en PostgreSQL: solo se guardan
+metadatos, y el contenido vive en el almacenamiento de objetos.
+
+| Variable | Valor predeterminado | Descripción |
+| --- | --- | --- |
+| `STORAGE_DRIVER` | `local`, o `s3` si existe `S3_BUCKET` | `local` para desarrollo; `s3` para producción |
+| `ATTACHMENT_MAX_BYTES` | `10485760` (10 MB) | Tamaño máximo por archivo |
+| `ATTACHMENT_MAX_COUNT` | `5` | Máximo de adjuntos por ticket |
+| `ATTACHMENT_LOCAL_DIR` | `.smartsupport/uploads` | Directorio local para desarrollo |
+| `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | — | Obligatorias cuando `STORAGE_DRIVER=s3` |
+| `S3_ENDPOINT`, `S3_FORCE_PATH_STYLE`, `S3_PREFIX` | — | Opcionales para S3 compatible (MinIO, R2) |
+
+En producción `STORAGE_DRIVER` debe ser `s3`: la API rechaza iniciarse en
+`NODE_ENV=production` con almacenamiento local para no depender del disco
+efímero. Las credenciales y claves de almacenamiento nunca se exponen en
+respuestas ni registros; las descargas requieren autorización por rol (ADMIN,
+creador del ticket o técnico asignado) y se sirven siempre con
+`Content-Disposition: attachment`.
+
 ## Funcionalidades
 
 - Dashboard con resumen de incidencias
@@ -107,6 +131,7 @@ También existen variantes por workspace, como `test:web`, `test:api`,
 - Búsqueda, filtros y ordenamiento
 - Asignación y administración de técnicos
 - Estados, prioridades, vencimientos SLA y comentarios
+- Archivos adjuntos a tickets con validación de firma y permisos por rol
 - Historial de actividad y notificaciones
 - Métricas operativas
 - Configuración de perfil y tiempos SLA

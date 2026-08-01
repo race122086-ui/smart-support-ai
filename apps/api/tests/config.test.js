@@ -10,6 +10,16 @@ test('carga valores predeterminados seguros para desarrollo local', () => {
     logLevel: 'info',
     databaseUrl: null,
     dataFile: '.smartsupport/data.json',
+    storageDriver: 'local',
+    s3: {
+      bucket: null, region: null, accessKeyId: null, secretAccessKey: null,
+      endpoint: null, forcePathStyle: false, prefix: '',
+    },
+    attachment: {
+      maxBytes: 10485760,
+      maxCount: 5,
+      localDir: '.smartsupport/uploads',
+    },
     smtp: {
       host: null, port: 587, user: null, password: null, from: null,
       secure: false, frontendUrl: null, enabled: false,
@@ -51,18 +61,60 @@ test('permite que API_HOST sobrescriba el host inferido', () => {
   assert.equal(loadConfig({ PORT: '8080', API_HOST: '127.0.0.1' }).host, '127.0.0.1')
 })
 
-test('exige PostgreSQL en producción', () => {
+test('exige PostgreSQL y almacenamiento S3 en producción', () => {
   assert.throws(
     () => loadConfig({ NODE_ENV: 'production' }),
     /DATABASE_URL es obligatoria en producción/
+  )
+  assert.throws(
+    () => loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgresql://local:test@127.0.0.1:5432/smartsupport_test' }),
+    /STORAGE_DRIVER debe ser s3 en producción/
+  )
+  assert.throws(
+    () => loadConfig({
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://local:test@127.0.0.1:5432/smartsupport_test',
+      STORAGE_DRIVER: 's3',
+    }),
+    /S3_BUCKET/
   )
   assert.equal(
     loadConfig({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://local:test@127.0.0.1:5432/smartsupport_test',
+      STORAGE_DRIVER: 's3',
+      S3_BUCKET: 'smart-support-uploads',
+      S3_REGION: 'us-east-1',
+      S3_ACCESS_KEY_ID: 'fixture',
+      S3_SECRET_ACCESS_KEY: 'fixture',
     }).databaseUrl,
     'postgresql://local:test@127.0.0.1:5432/smartsupport_test'
   )
+})
+
+test('carga la configuración de adjuntos y S3 con valores por defecto', () => {
+  const local = loadConfig({ ATTACHMENT_MAX_BYTES: '2048' })
+  assert.equal(local.attachment.maxBytes, 2048)
+  assert.equal(local.attachment.maxCount, 5)
+  assert.equal(local.attachment.localDir, '.smartsupport/uploads')
+  assert.equal(local.storageDriver, 'local')
+
+  const s3 = loadConfig({
+    STORAGE_DRIVER: 's3',
+    S3_BUCKET: 'bucket-prueba',
+    S3_REGION: 'us-east-1',
+    S3_ACCESS_KEY_ID: 'key-fixture',
+    S3_SECRET_ACCESS_KEY: 'secret-fixture',
+    S3_ENDPOINT: 'https://minio.local:9000',
+    S3_FORCE_PATH_STYLE: 'true',
+    S3_PREFIX: 'adjuntos/',
+  })
+  assert.equal(s3.s3.bucket, 'bucket-prueba')
+  assert.equal(s3.s3.endpoint, 'https://minio.local:9000')
+  assert.equal(s3.s3.forcePathStyle, true)
+  assert.equal(s3.s3.prefix, 'adjuntos')
+  assert.throws(() => loadConfig({ ATTACHMENT_MAX_COUNT: '0' }), /ATTACHMENT_MAX_COUNT/)
+  assert.throws(() => loadConfig({ ATTACHMENT_MAX_BYTES: 'x' }), /ATTACHMENT_MAX_BYTES/)
 })
 
 test('valida y carga SMTP y el origen web opcional', () => {

@@ -35,12 +35,13 @@ async function refreshCsrfToken() {
 export async function request(path, options = {}) {
   const { csrfRecovery = true, ...fetchOptions } = options
   const method = fetchOptions.method || 'GET'
+  const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...fetchOptions,
     credentials: 'include',
     headers: {
       Accept: 'application/json',
-      ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(!isFormData && fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
       ...(!['GET', 'HEAD'].includes(method) && csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
       ...fetchOptions.headers,
     },
@@ -91,6 +92,35 @@ export const api = {
   addComment(id, message) { return request(`/reports/${encodeURIComponent(id)}/comments`, jsonOptions('POST', { message })) },
   getActivity(id) { return request(`/reports/${encodeURIComponent(id)}/activity`) },
   getSla(id) { return request(`/reports/${encodeURIComponent(id)}/sla`) },
+  listAttachments(reportId) { return request(`/reports/${encodeURIComponent(reportId)}/attachments`) },
+  uploadAttachment(reportId, file) {
+    const body = new FormData()
+    body.append('file', file)
+    return request(`/reports/${encodeURIComponent(reportId)}/attachments`, { method: 'POST', body })
+  },
+  deleteAttachment(reportId, attachmentId) {
+    return request(
+      `/reports/${encodeURIComponent(reportId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { method: 'DELETE' }
+    )
+  },
+  async downloadAttachment(reportId, attachmentId) {
+    const response = await fetch(
+      `${apiBaseUrl}/reports/${encodeURIComponent(reportId)}/attachments/${encodeURIComponent(attachmentId)}/download`,
+      { credentials: 'include' }
+    )
+    if (!response.ok) {
+      throw new ApiError('No se pudo descargar el archivo', response.status, 'DOWNLOAD_ERROR')
+    }
+    const blob = await response.blob()
+    const disposition = response.headers.get('content-disposition') || ''
+    const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+    const quoted = disposition.match(/filename="([^"]+)"/i)
+    const fileName = encoded
+      ? decodeURIComponent(encoded[1])
+      : (quoted ? quoted[1] : 'adjunto')
+    return { blob, fileName }
+  },
   getMetrics() { return request('/metrics') },
   listTechnicians() { return request('/technicians') },
   addTechnician(name) { return request('/technicians', jsonOptions('POST', { name })) },

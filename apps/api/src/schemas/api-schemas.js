@@ -15,6 +15,16 @@ export const idParams = {
   properties: { id: { type: 'string', minLength: 1 } },
 }
 
+export const attachmentParams = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'attachmentId'],
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    attachmentId: { type: 'string', minLength: 1 },
+  },
+}
+
 export const reportCreateBody = {
   type: 'object',
   additionalProperties: false,

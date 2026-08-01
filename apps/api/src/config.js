@@ -1,4 +1,5 @@
 const allowedLogLevels = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']
+const storageDrivers = ['local', 's3']
 
 function parseSmtpPort(value) {
   if (!value) return 587
@@ -36,6 +37,55 @@ function parsePort(value) {
   return port
 }
 
+function positiveInteger(value, fallback, name) {
+  if (value === undefined || value === '') return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new TypeError(`${name} debe ser un entero mayor que cero`)
+  }
+  return parsed
+}
+
+function loadStorageDriver(environment) {
+  const value = environment.STORAGE_DRIVER?.trim()
+    || (environment.S3_BUCKET ? 's3' : 'local')
+  if (!storageDrivers.includes(value)) {
+    throw new TypeError(`STORAGE_DRIVER debe ser uno de: ${storageDrivers.join(', ')}`)
+  }
+  return value
+}
+
+function loadS3Config(environment, storageDriver) {
+  const bucket = environment.S3_BUCKET?.trim() || null
+  const region = environment.S3_REGION?.trim() || null
+  const accessKeyId = environment.S3_ACCESS_KEY_ID?.trim() || null
+  const secretAccessKey = environment.S3_SECRET_ACCESS_KEY || null
+  const endpoint = environment.S3_ENDPOINT?.trim() || null
+  const forcePathStyle = parseBoolean(environment.S3_FORCE_PATH_STYLE, 'S3_FORCE_PATH_STYLE')
+  if (storageDriver === 's3') {
+    const missing = [
+      ['S3_BUCKET', bucket],
+      ['S3_REGION', region],
+      ['S3_ACCESS_KEY_ID', accessKeyId],
+      ['S3_SECRET_ACCESS_KEY', secretAccessKey],
+    ].filter(([, value]) => !value)
+    if (missing.length) {
+      throw new TypeError(
+        `STORAGE_DRIVER=s3 requiere: ${missing.map(([name]) => name).join(', ')}`
+      )
+    }
+  }
+  return {
+    bucket,
+    region,
+    accessKeyId,
+    secretAccessKey,
+    endpoint,
+    forcePathStyle,
+    prefix: environment.S3_PREFIX?.trim().replace(/^\/+|\/+$/g, '') || '',
+  }
+}
+
 export function loadConfig(environment = process.env) {
   const logLevel = environment.API_LOG_LEVEL || 'info'
   if (!allowedLogLevels.includes(logLevel)) {
@@ -55,6 +105,11 @@ export function loadConfig(environment = process.env) {
   if (production && !environment.DATABASE_URL) {
     throw new TypeError('DATABASE_URL es obligatoria en producción')
   }
+  const storageDriver = loadStorageDriver(environment)
+  if (production && storageDriver !== 's3') {
+    throw new TypeError('STORAGE_DRIVER debe ser s3 en producción: no se puede depender del disco efímero')
+  }
+  const s3 = loadS3Config(environment, storageDriver)
   const smtp = {
     host: environment.SMTP_HOST?.trim() || null,
     port: parseSmtpPort(environment.SMTP_PORT),
@@ -73,6 +128,17 @@ export function loadConfig(environment = process.env) {
     logLevel,
     databaseUrl: environment.DATABASE_URL || null,
     dataFile: environment.API_DATA_FILE || '.smartsupport/data.json',
+    storageDriver,
+    s3,
+    attachment: {
+      maxBytes: positiveInteger(
+        environment.ATTACHMENT_MAX_BYTES,
+        10 * 1024 * 1024,
+        'ATTACHMENT_MAX_BYTES'
+      ),
+      maxCount: positiveInteger(environment.ATTACHMENT_MAX_COUNT, 5, 'ATTACHMENT_MAX_COUNT'),
+      localDir: environment.ATTACHMENT_LOCAL_DIR?.trim() || '.smartsupport/uploads',
+    },
     smtp,
   }
 }

@@ -1,10 +1,18 @@
 import { DEPARTMENTS, PRIORITIES } from '@smartsupport/contracts'
+import { useRef } from 'react'
 
-export function TicketForm({ initialValue = {}, submitLabel = 'Registrar falla', pending, onSubmit }) {
+const acceptedFiles = '.png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.csv,.md,.log,.json'
+
+export function TicketForm({ initialValue = {}, submitLabel = 'Registrar falla', pending, onSubmit, attachments = false }) {
+  const attachmentInput = useRef(null)
+
   function handleSubmit(event) {
     event.preventDefault()
     if (!event.currentTarget.reportValidity()) return
     const form = new FormData(event.currentTarget)
+    const files = attachments
+      ? Array.from(attachmentInput.current?.files || []).filter((file) => file.size > 0)
+      : []
     onSubmit({
       userName: form.get('userName').trim(),
       contactEmail: form.get('contactEmail').trim(),
@@ -12,6 +20,7 @@ export function TicketForm({ initialValue = {}, submitLabel = 'Registrar falla',
       department: form.get('department'),
       description: form.get('description').trim(),
       priority: form.get('priority'),
+      files,
     })
   }
 
@@ -23,6 +32,7 @@ export function TicketForm({ initialValue = {}, submitLabel = 'Registrar falla',
       <div className="form-group"><label htmlFor="department">Área o departamento</label><select id="department" name="department" defaultValue={initialValue.department || DEPARTMENTS[0]}>{DEPARTMENTS.map((department) => <option key={department}>{department}</option>)}</select></div>
       <div className="form-group form-group--description"><label htmlFor="description">Descripción de la falla</label><textarea id="description" name="description" rows="5" defaultValue={initialValue.description} required maxLength="2000" /></div>
       <div className="form-group"><label htmlFor="priority">Prioridad</label><select id="priority" name="priority" defaultValue={initialValue.priority || PRIORITIES[1]}>{PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}</select></div>
+      {attachments && <div className="form-group"><label htmlFor="attachments">Archivos adjuntos (opcional)</label><input id="attachments" ref={attachmentInput} type="file" multiple accept={acceptedFiles} /></div>}
       <button type="submit" className="btn btn--primary btn--full" disabled={pending}>{pending ? 'Guardando…' : submitLabel}</button>
     </form>
   )

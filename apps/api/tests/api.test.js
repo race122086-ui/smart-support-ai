@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import { buildApp } from '../src/app.js'
 import { hashPassword } from '../src/auth/auth-service.js'
@@ -14,6 +17,7 @@ const validReport = {
 }
 
 async function createTestApp() {
+  const attachmentDir = await mkdtemp(join(tmpdir(), 'smartsupport-api-'))
   let sequence = 0
   const repository = new MemoryRepository({ users: [{
     id: 'admin-test', name: 'Admin Test', email: 'admin@example.test',
@@ -27,12 +31,17 @@ async function createTestApp() {
       port: 3000,
       corsOrigin: 'http://localhost:5173',
       logLevel: 'silent',
+      storageDriver: 'local',
+      attachment: { maxBytes: 1024 * 1024, maxCount: 5, localDir: attachmentDir },
     },
     repository,
     serviceOptions: {
       clock: () => new Date('2026-07-29T12:00:00.000Z'),
       idFactory: () => `id-${++sequence}`,
     },
+  })
+  app.onClose(async () => {
+    await rm(attachmentDir, { recursive: true, force: true })
   })
   const originalInject = app.inject.bind(app)
   const login = await originalInject({ method: 'POST', url: '/api/v1/auth/login', payload: { email: 'admin@example.test', password: 'SeguraPruebas123' } })
@@ -295,4 +304,95 @@ test('exporta e importa respaldos de forma atómica', async (t) => {
   })
   assert.equal(repeated.statusCode, 200)
   assert.equal(repeated.json().duplicate, true)
+})
+
+function multipartPayload(filename, contentType, bytes) {
+  const boundary = '----smartsupport-test'
+  const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`
+  const footer = `\r\n--${boundary}--\r\n`
+  return Buffer.concat([Buffer.from(header, 'utf8'), bytes, Buffer.from(footer, 'utf8')])
+}
+
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d])
+
+test('administra adjuntos por HTTP sin exponer claves de almacenamiento', async (t) => {
+  const app = await createTestApp()
+  t.after(() => app.close())
+
+  const created = await app.inject({
+    method: 'POST',
+    url: '/api/v1/reports',
+    payload: validReport,
+  })
+  const report = created.json()
+
+  const upload = await app.inject({
+    method: 'POST',
+    url: `/api/v1/reports/${report.id}/attachments`,
+    headers: { 'content-type': 'multipart/form-data; boundary=----smartsupport-test' },
+    payload: multipartPayload('captura.png', 'image/png', pngBytes),
+  })
+  assert.equal(upload.statusCode, 201)
+  const attachment = upload.json()
+  assert.equal(attachment.fileName, 'captura.png')
+  assert.equal(attachment.mimeType, 'image/png')
+  assert.equal(attachment.size, pngBytes.length)
+  assert.ok(!('storageKey' in attachment))
+  assert.ok(!('storedName' in attachment))
+
+  const rejected = await app.inject({
+    method: 'POST',
+    url: `/api/v1/reports/${report.id}/attachments`,
+    headers: { 'content-type': 'multipart/form-data; boundary=----smartsupport-test' },
+    payload: multipartPayload('pagina.html', 'text/html', Buffer.from('<!doctype html>', 'utf8')),
+  })
+  assert.equal(rejected.statusCode, 422)
+  assert.equal(rejected.json().error.code, 'VALIDATION_ERROR')
+
+  const list = await app.inject({
+    method: 'GET',
+    url: `/api/v1/reports/${report.id}/attachments`,
+  })
+  assert.equal(list.statusCode, 200)
+  assert.equal(list.json().length, 1)
+
+  const download = await app.inject({
+    method: 'GET',
+    url: `/api/v1/reports/${report.id}/attachments/${attachment.id}/download`,
+  })
+  assert.equal(download.statusCode, 200)
+  assert.equal(download.headers['content-type'], 'image/png')
+  assert.match(download.headers['content-disposition'], /^attachment;/)
+  assert.equal(download.headers['content-length'], String(pngBytes.length))
+  assert.deepEqual(download.rawPayload, pngBytes)
+
+  const activity = await app.inject({
+    method: 'GET',
+    url: `/api/v1/reports/${report.id}/activity`,
+  })
+  assert.ok(activity.json().some((entry) => entry.message.startsWith('Se adjuntó el archivo')))
+
+  const removed = await app.inject({
+    method: 'DELETE',
+    url: `/api/v1/reports/${report.id}/attachments/${attachment.id}`,
+  })
+  assert.equal(removed.statusCode, 204)
+
+  const afterRemoval = await app.inject({
+    method: 'GET',
+    url: `/api/v1/reports/${report.id}/attachments`,
+  })
+  assert.equal(afterRemoval.json().length, 0)
+})
+
+test('protege la descarga de adjuntos cuando el ticket no existe', async (t) => {
+  const app = await createTestApp()
+  t.after(() => app.close())
+
+  const missing = await app.inject({
+    method: 'GET',
+    url: '/api/v1/reports/no-existe/attachments/abc/download',
+  })
+  assert.equal(missing.statusCode, 404)
+  assert.deepEqual(Object.keys(missing.json()), ['error'])
 })
