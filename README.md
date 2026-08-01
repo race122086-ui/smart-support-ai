@@ -287,3 +287,14 @@ propietario a partir del nombre o correo histórico.
 Los respaldos nuevos usan la versión 2. No contienen hashes de contraseña,
 sesiones ni tokens. Los respaldos versión 1 siguen siendo importables y sus
 reportes se consideran históricos sin propietario.
+
+### Correo saliente
+
+El backend admite SMTP mediante las variables `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+`SMTP_PASSWORD`, `SMTP_FROM` y `SMTP_SECURE`. Las credenciales se suministran solo en
+el entorno y nunca se guardan en el repositorio. `FRONTEND_URL` o `WEB_APP_URL` son
+opcionales y permiten incluir enlaces a los tickets.
+
+Si SMTP no está completo, la API conserva el flujo normal y solo registra destinatario,
+asunto y evento. Se usa Nodemailer como única dependencia nueva porque implementa SMTP
+estándar con tiempos de espera y mantiene el proveedor desacoplado de `MailService`.

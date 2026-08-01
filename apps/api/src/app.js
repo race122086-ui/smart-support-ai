@@ -12,6 +12,7 @@ import { PrismaRepository } from './repositories/prisma-repository.js'
 import { apiRoutes, sharedSchemas } from './routes/api-routes.js'
 import { authRoutes } from './routes/auth-routes.js'
 import { SupportService } from './services/support-service.js'
+import { MailService } from './services/mail-service.js'
 
 function validationDetails(validation = []) {
   return validation.map((issue) => ({
@@ -34,9 +35,11 @@ export async function buildApp(options = {}) {
       : new FileRepository(config.dataFile)
   )
   const notificationHub = options.notificationHub || new NotificationHub()
+  const mailService = options.mailService || new MailService(config.smtp, { logger: app.log })
   const service = options.service || new SupportService(repository, {
     ...options.serviceOptions,
     notificationHub,
+    mailService,
   })
   const authService = options.authService || new AuthService(repository, options.authOptions)
 

@@ -10,6 +10,10 @@ test('carga valores predeterminados seguros para desarrollo local', () => {
     logLevel: 'info',
     databaseUrl: null,
     dataFile: '.smartsupport/data.json',
+    smtp: {
+      host: null, port: 587, user: null, password: null, from: null,
+      secure: false, frontendUrl: null, enabled: false,
+    },
     production: false,
   })
 })
@@ -59,4 +63,19 @@ test('exige PostgreSQL en producción', () => {
     }).databaseUrl,
     'postgresql://local:test@127.0.0.1:5432/smartsupport_test'
   )
+})
+
+test('valida y carga SMTP y el origen web opcional', () => {
+  const config = loadConfig({
+    SMTP_HOST: 'smtp.example.com', SMTP_PORT: '465', SMTP_USER: 'mailer',
+    SMTP_PASSWORD: 'valor-solo-fixture', SMTP_FROM: 'Soporte <support@example.com>',
+    SMTP_SECURE: 'true', FRONTEND_URL: 'https://app.example.com/ruta-ignorada',
+  })
+  assert.equal(config.smtp.enabled, true)
+  assert.equal(config.smtp.port, 465)
+  assert.equal(config.smtp.secure, true)
+  assert.equal(config.smtp.frontendUrl, 'https://app.example.com')
+  assert.throws(() => loadConfig({ SMTP_PORT: '70000' }), /SMTP_PORT/)
+  assert.throws(() => loadConfig({ SMTP_SECURE: 'yes' }), /SMTP_SECURE/)
+  assert.throws(() => loadConfig({ WEB_APP_URL: 'archivo-local' }), /WEB_APP_URL/)
 })

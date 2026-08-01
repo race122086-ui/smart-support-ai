@@ -56,6 +56,7 @@ export class SupportService {
     this.idFactory = options.idFactory || (() => crypto.randomUUID())
     this.clock = options.clock || (() => new Date())
     this.notificationHub = options.notificationHub || null
+    this.mailService = options.mailService || null
   }
 
   now() {
@@ -98,6 +99,19 @@ export class SupportService {
     return [...recipients]
   }
 
+  async mailRecipients(repository, recipientIds, excludeActorId) {
+    const ids = new Set(recipientIds)
+    if (excludeActorId) ids.delete(excludeActorId)
+    return (await repository.listUsers()).filter((user) => user.active && ids.has(user.id))
+  }
+
+  dispatchMail(mail) {
+    if (!mail || !this.mailService) return
+    setImmediate(() => {
+      Promise.resolve(this.mailService.sendTicketEvent(mail)).catch(() => {})
+    })
+  }
+
   async notifyRecipients(repository, recipientIds, data, now = this.now()) {
     const notifications = []
     for (const recipientId of new Set(recipientIds)) {
@@ -121,6 +135,7 @@ export class SupportService {
   async finishNotificationTransaction(work) {
     const result = await this.repository.transaction(work)
     this.publishNotifications(result.notifications)
+    this.dispatchMail(result.mail)
     return result.value
   }
 
@@ -203,7 +218,10 @@ export class SupportService {
         type: 'ticket_created',
         message: `Se creó el reporte INC-${String(ticketNumber).padStart(4, '0')}`,
       }, now)
-      return { value: report, notifications }
+      const mailRecipients = await this.mailRecipients(repository, recipients, actor.id)
+      return { value: report, notifications, mail: {
+        eventType: 'ticket_created', report, recipients: mailRecipients,
+      } }
     })
   }
 
@@ -294,7 +312,12 @@ export class SupportService {
         type: 'status_changed',
         message: `El reporte INC-${String(report.ticketNumber).padStart(4, '0')} cambió a ${status}`,
       }, now)
-      return { value: report, notifications }
+      const mailRecipients = await this.mailRecipients(repository, recipients, actor.id)
+      const mail = previousStatus === status ? null : {
+        eventType: status === 'Resuelto' ? 'ticket_closed' : 'status_changed',
+        report, recipients: mailRecipients, detail: `Estado cambiado de ${previousStatus} a ${status}`,
+      }
+      return { value: report, notifications, mail }
     })
   }
 
@@ -340,7 +363,10 @@ export class SupportService {
         type: 'technician_assigned',
         message: `Se actualizó la asignación del reporte INC-${String(report.ticketNumber).padStart(4, '0')}`,
       }, now)
-      return { value: report, notifications }
+      const mailRecipients = await this.mailRecipients(repository, recipients, actor.id)
+      return { value: report, notifications, mail: {
+        eventType: 'technician_assigned', report, recipients: mailRecipients, detail: message,
+      } }
     })
   }
 
@@ -364,7 +390,10 @@ export class SupportService {
         type: 'comment_added',
         message: `Se comentó el reporte INC-${String(report.ticketNumber).padStart(4, '0')}`,
       }, now)
-      return { value: activity, notifications }
+      const mailRecipients = await this.mailRecipients(repository, recipients, actor.id)
+      return { value: activity, notifications, mail: {
+        eventType: 'comment_added', report, recipients: mailRecipients, detail: message.trim(),
+      } }
     })
   }
 

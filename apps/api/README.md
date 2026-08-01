@@ -71,3 +71,15 @@ npm run build:api
 El endpoint de salud está en `GET /health`, la API en `/api/v1` y la
 documentación interactiva en `/documentation`. El documento OpenAPI se
 encuentra en `/documentation/json`.
+
+## Correo electrónico
+
+La API usa un `MailService` independiente con Nodemailer como adaptador SMTP. Se eligió
+Nodemailer porque ofrece transporte SMTP estándar, mantenido y sustituible sin acoplar
+la lógica de tickets a un proveedor específico. Es la única dependencia agregada.
+
+La configuración se recibe exclusivamente mediante `SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` y `SMTP_SECURE`. `FRONTEND_URL` o
+`WEB_APP_URL` puede definir el origen usado en enlaces a tickets. Si falta parte de la
+configuración SMTP, el sistema no intenta enviar y registra únicamente destinatario,
+asunto y tipo de evento. Los secretos no deben escribirse en archivos ni registros.

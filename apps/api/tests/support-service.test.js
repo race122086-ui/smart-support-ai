@@ -147,3 +147,55 @@ test('registra el cierre una sola vez cuando el reporte cambia a Resuelto', asyn
   report = await repository.getReport('reporte-cierre')
   assert.equal(report.activity.filter((item) => item.message === 'Reporte cerrado').length, 1)
 })
+
+test('envía los cinco eventos a los destinatarios correctos sin incluir al actor', async () => {
+  const sent = []
+  const users = [
+    { id: 'admin-1', name: 'Admin', email: 'admin@example.com', role: 'ADMIN', active: true },
+    { id: 'creator-1', name: 'Creadora', email: 'creator@example.com', role: 'USER', active: true },
+    { id: 'tech-user-1', name: 'Técnica', email: 'tech@example.com', role: 'TECHNICIAN', technicianId: 'tech-1', active: true },
+  ]
+  const repository = new MemoryRepository({
+    users,
+    technicians: [{ id: 'tech-1', name: 'Técnica', userId: 'tech-user-1', active: true }],
+  })
+  let sequence = 0
+  const service = new SupportService(repository, {
+    clock: () => new Date('2026-08-01T12:00:00.000Z'),
+    idFactory: () => `mail-id-${++sequence}`,
+    mailService: { sendTicketEvent: async (event) => { sent.push(event) } },
+  })
+  const creator = users[1]
+  const technician = users[2]
+  const report = await service.createReport(validReport, creator)
+  await service.assignTechnician(report.id, 'Técnica', users[0])
+  await service.changeStatus(report.id, 'En progreso', technician)
+  await service.addComment(report.id, 'Necesito seguimiento', creator)
+  await service.changeStatus(report.id, 'Resuelto', users[0])
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(sent.map((event) => event.eventType), [
+    'ticket_created', 'technician_assigned', 'status_changed', 'comment_added', 'ticket_closed',
+  ])
+  assert.deepEqual(sent.map((event) => event.recipients.map((recipient) => recipient.email).sort()), [
+    ['admin@example.com'],
+    ['creator@example.com', 'tech@example.com'],
+    ['admin@example.com', 'creator@example.com'],
+    ['admin@example.com', 'tech@example.com'],
+    ['creator@example.com', 'tech@example.com'],
+  ])
+})
+
+test('un fallo de correo no impide crear el ticket', async () => {
+  const repository = new MemoryRepository({
+    users: [{ id: 'admin-test', name: 'Admin', email: 'admin@example.com', role: 'ADMIN', active: true }],
+  })
+  const service = new SupportService(repository, {
+    idFactory: () => crypto.randomUUID(),
+    mailService: { sendTicketEvent: async () => { throw new Error('fallo simulado') } },
+  })
+  const report = await service.createReport(validReport, admin)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(report.ticketNumber, 1)
+  assert.equal((await repository.listReports()).length, 1)
+})
