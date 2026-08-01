@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { api } from '../../../api/client.js'
 import { queryKeys, useApiQuery } from '../../../api/queries.js'
 import { useToast } from '../../../components/ui/Feedback.jsx'
@@ -11,6 +11,7 @@ export function AttachmentsSection({ reportId, report, user }) {
   const client = useQueryClient()
   const notify = useToast()
   const fileInput = useRef(null)
+  const [hasFile, setHasFile] = useState(false)
   const attachments = useApiQuery(
     queryKeys.attachments(reportId),
     () => api.listAttachments(reportId),
@@ -30,6 +31,7 @@ export function AttachmentsSection({ reportId, report, user }) {
     onSuccess: async () => {
       notify('Archivo adjuntado')
       if (fileInput.current) fileInput.current.value = ''
+      setHasFile(false)
       await invalidate()
     },
     onError: (error) => notify(error.message, 'error'),
@@ -90,12 +92,9 @@ export function AttachmentsSection({ reportId, report, user }) {
         const file = fileInput.current?.files?.[0]
         if (file) upload.mutate(file)
       }}>
-        <label className="sr-only" htmlFor="attachment-file">Adjuntar archivo</label>
-        <input id="attachment-file" ref={fileInput} className="comment-input" type="file" accept={acceptedFiles} onChange={(event) => {
-          const file = event.target.files?.[0]
-          if (file) upload.mutate(file)
-        }} />
-        <button className="btn btn--comment" type="submit" disabled={!fileInput.current?.files?.length || upload.isPending}>Adjuntar</button>
+        <label className="sr-only" htmlFor="attachment-file">Seleccionar archivo</label>
+        <input id="attachment-file" ref={fileInput} className="comment-input" type="file" accept={acceptedFiles} onChange={() => setHasFile(Boolean(fileInput.current?.files?.length))} />
+        <button className="btn btn--comment" type="submit" disabled={!hasFile || upload.isPending}>{upload.isPending ? 'Adjuntando…' : 'Adjuntar'}</button>
       </form>
     </section>
   )
