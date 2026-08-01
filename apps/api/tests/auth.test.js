@@ -189,6 +189,46 @@ test('aplica permisos ADMIN, TECHNICIAN y USER y aísla tickets entre usuarios',
   assert.equal(techList.statusCode, 200)
   assert.ok(techList.json().items.some((item) => item.id === 'historico'))
 
+  for (const session of [technician, userA]) {
+    const listTechnicians = await app.inject(authenticated(session, {
+      method: 'GET',
+      url: '/api/v1/technicians',
+    }))
+    assert.equal(listTechnicians.statusCode, 403)
+
+    const createTechnician = await app.inject(authenticated(session, {
+      method: 'POST',
+      url: '/api/v1/technicians',
+      payload: { name: `No autorizado ${session === technician ? 'técnico' : 'usuario'}` },
+    }))
+    assert.equal(createTechnician.statusCode, 403)
+
+    const deleteTechnician = await app.inject(authenticated(session, {
+      method: 'DELETE',
+      url: '/api/v1/technicians/tech-id',
+    }))
+    assert.equal(deleteTechnician.statusCode, 403)
+  }
+
+  const adminTechnicians = await app.inject(authenticated(admin, {
+    method: 'GET',
+    url: '/api/v1/technicians',
+  }))
+  assert.equal(adminTechnicians.statusCode, 200)
+
+  const adminCreatedTechnician = await app.inject(authenticated(admin, {
+    method: 'POST',
+    url: '/api/v1/technicians',
+    payload: { name: 'Técnico administrado' },
+  }))
+  assert.equal(adminCreatedTechnician.statusCode, 201)
+
+  const adminDeletedTechnician = await app.inject(authenticated(admin, {
+    method: 'DELETE',
+    url: `/api/v1/technicians/${adminCreatedTechnician.json().id}`,
+  }))
+  assert.equal(adminDeletedTechnician.statusCode, 204)
+
   const selfAssigned = await app.inject(authenticated(technician, {
     method: 'PUT',
     url: '/api/v1/reports/historico/technician',

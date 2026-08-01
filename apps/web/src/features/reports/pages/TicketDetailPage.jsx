@@ -17,7 +17,7 @@ export function TicketDetailPage() {
   const [comment, setComment] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const report = useReport(id)
-  const technicians = useApiQuery(queryKeys.technicians, api.listTechnicians, { enabled: user.role !== 'USER' })
+  const technicians = useApiQuery(queryKeys.technicians, api.listTechnicians, { enabled: user.role === 'ADMIN' })
   const activity = useApiQuery(queryKeys.activity(id), () => api.getActivity(id))
   const sla = useApiQuery(queryKeys.sla(id), () => api.getSla(id))
 
@@ -56,13 +56,19 @@ export function TicketDetailPage() {
         <div className="report-card__meta"><span className={priorityClass(item.priority)}>{item.priority}</span><span className={statusClass(item.status)}>{item.status}</span><span>{item.department}</span></div>
         <p className="ticket-detail__description">{item.description}</p>
         <dl className="ticket-detail__contact"><div><dt>Correo</dt><dd><a href={`mailto:${item.contactEmail}`}>{item.contactEmail}</a></dd></div><div><dt>Teléfono</dt><dd>{item.contactPhone}</dd></div><div><dt>SLA</dt><dd className={sla.data?.overdue ? 'danger-text' : ''}>{sla.data ? `${sla.data.overdue ? 'Vencido' : 'Vence'}: ${formatDate(sla.data.deadline)}` : 'Calculando…'}</dd></div></dl>
-        {user.role !== 'USER' && <div className="report-card__assignment">
+        {user.role === 'ADMIN' && <div className="report-card__assignment">
           <label htmlFor="detail-technician">Técnico responsable</label>
-          <select id="detail-technician" className="technician-select" value={item.technician} disabled={mutation.isPending || (user.role === 'TECHNICIAN' && item.technician !== UNASSIGNED_TECHNICIAN)} onChange={(event) => mutation.mutate({ action: 'technician', value: event.target.value })}>
+          <select id="detail-technician" className="technician-select" value={item.technician} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ action: 'technician', value: event.target.value })}>
             <option>{UNASSIGNED_TECHNICIAN}</option>{technicians.data?.map((technician) => <option key={technician.id}>{technician.name}</option>)}
           </select>
           <label htmlFor="detail-status">Estado del ticket</label>
           <select id="detail-status" className="status-select" value={item.status} disabled={mutation.isPending} onChange={(event) => mutation.mutate({ action: 'status', value: event.target.value })}>{STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
+        </div>}
+        {user.role === 'TECHNICIAN' && <div className="report-card__assignment">
+          <strong>Técnico responsable: {item.technician}</strong>
+          {item.technician === UNASSIGNED_TECHNICIAN && <button className="btn btn--primary" type="button" disabled={mutation.isPending} onClick={() => mutation.mutate({ action: 'technician', value: user.name })}>Tomar ticket</button>}
+          <label htmlFor="detail-status">Estado del ticket</label>
+          <select id="detail-status" className="status-select" value={item.status} disabled={mutation.isPending || item.technician === UNASSIGNED_TECHNICIAN} onChange={(event) => mutation.mutate({ action: 'status', value: event.target.value })}>{STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
         </div>}
         <section className="activity" aria-labelledby="activity-title">
           <h3 id="activity-title">Historial de actividad</h3>

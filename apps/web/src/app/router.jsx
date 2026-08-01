@@ -1,5 +1,6 @@
 import { createBrowserRouter, Link, Navigate, useLocation } from 'react-router-dom'
 import { useSession } from './session.jsx'
+import { ADMIN_ONLY_ROLES } from './authorization.js'
 import { AppShell } from '../components/layout/AppShell.jsx'
 import { LoadingState } from '../components/ui/Feedback.jsx'
 import { ActivityPage } from '../features/activity/ActivityPage.jsx'
@@ -41,11 +42,11 @@ export const router = createBrowserRouter([
       { path: 'tickets/new', element: <RolePage roles={['ADMIN', 'USER']}><NewTicketPage /></RolePage> },
       { path: 'tickets/:id', element: <TicketDetailPage /> },
       { path: 'tickets/:id/edit', element: <RolePage roles={['ADMIN', 'USER']}><EditTicketPage /></RolePage> },
-      { path: 'technicians', element: <RolePage roles={['ADMIN', 'TECHNICIAN']}><TechniciansPage /></RolePage> },
+      { path: 'technicians', element: <RolePage roles={ADMIN_ONLY_ROLES}><TechniciansPage /></RolePage> },
       { path: 'activity', element: <RolePage roles={['ADMIN', 'TECHNICIAN']}><ActivityPage /></RolePage> },
-      { path: 'reports', element: <RolePage roles={['ADMIN']}><MetricsPage /></RolePage> },
-      { path: 'users', element: <RolePage roles={['ADMIN']}><UsersPage /></RolePage> },
-      { path: 'settings', element: <RolePage roles={['ADMIN']}><SettingsPage /></RolePage> },
+      { path: 'reports', element: <RolePage roles={ADMIN_ONLY_ROLES}><MetricsPage /></RolePage> },
+      { path: 'users', element: <RolePage roles={ADMIN_ONLY_ROLES}><UsersPage /></RolePage> },
+      { path: 'settings', element: <RolePage roles={ADMIN_ONLY_ROLES}><SettingsPage /></RolePage> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

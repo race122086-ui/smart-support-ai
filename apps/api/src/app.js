@@ -123,6 +123,7 @@ export async function buildApp(options = {}) {
     `${API_PREFIX}/users`,
     `${API_PREFIX}/backups`,
     `${API_PREFIX}/settings`,
+    `${API_PREFIX}/technicians`,
     `${API_PREFIX}/notifications`,
     `${API_PREFIX}/metrics`,
   ]
@@ -137,14 +138,6 @@ export async function buildApp(options = {}) {
     request.user = session.user
     if (adminPrefixes.some((prefix) => request.url.startsWith(prefix))
       && request.user.role !== 'ADMIN') {
-      throw new DomainError('FORBIDDEN', 'No tienes permiso para realizar esta acción', 403)
-    }
-    if (request.url.startsWith(`${API_PREFIX}/technicians`) && !['ADMIN', 'TECHNICIAN'].includes(request.user.role)) {
-      throw new DomainError('FORBIDDEN', 'No tienes permiso para realizar esta acción', 403)
-    }
-    const managesTechnicians = ['POST', 'DELETE'].includes(request.method)
-      && request.url.startsWith(`${API_PREFIX}/technicians`)
-    if (managesTechnicians && request.user.role !== 'ADMIN') {
       throw new DomainError('FORBIDDEN', 'No tienes permiso para realizar esta acción', 403)
     }
   })

@@ -11,7 +11,7 @@ const navigation = [
   ['/', 'Dashboard', ['ADMIN', 'TECHNICIAN', 'USER']],
   ['/tickets', 'Tickets de soporte', ['ADMIN', 'TECHNICIAN', 'USER']],
   ['/tickets/new', 'Nuevo ticket', ['ADMIN', 'USER']],
-  ['/technicians', 'Técnicos', ['ADMIN', 'TECHNICIAN']],
+  ['/technicians', 'Técnicos', ['ADMIN']],
   ['/activity', 'Actividad', ['ADMIN', 'TECHNICIAN']],
   ['/reports', 'Reportes', ['ADMIN']],
   ['/users', 'Usuarios', ['ADMIN']],
